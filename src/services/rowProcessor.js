@@ -9,7 +9,6 @@ function extractVerificationCode(htmlContent) {
   // Загружаем HTML в cheerio
   const $ = cheerio.load(htmlContent);
 
-  // Ищем текст, содержащий фразу с кодом
   const text = $("body").text();
 
   // Регулярное выражение для поиска кода (4 цифры после фразы)
