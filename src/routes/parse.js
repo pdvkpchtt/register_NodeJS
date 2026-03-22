@@ -176,7 +176,7 @@ async function runParseJob(app) {
 
     emitProgress(0, totalRows, 0, 0);
 
-    for (let start = startRow; start <= endRow; start += batchSize) {
+    parseRows: for (let start = startRow; start <= endRow; start += batchSize) {
       if (!memoryStore.isProcessing()) {
         emitLog("warn", "⚠️ Прервано");
         break;
@@ -245,9 +245,17 @@ async function runParseJob(app) {
 
         const result = await processRow(
           row,
-          { externalEmail: shouldGenerateEmail ? null : emailAddress },
+          {
+            externalEmail: shouldGenerateEmail ? null : emailAddress,
+            shouldContinue: () => memoryStore.isProcessing(),
+          },
           emitLog
         );
+
+        if (result.cancelled) {
+          emitLog("warn", "⚠️ Остановка: прервана текущая строка");
+          break parseRows;
+        }
 
         let fileChanged = false;
 

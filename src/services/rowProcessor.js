@@ -191,6 +191,48 @@ const INIT_SCRIPTS = `
   window.chrome = { runtime: {} };
 `;
 
+const PROCESS_CANCELLED = "__PROCESS_CANCELLED__";
+
+function assertContinue(shouldContinue) {
+  if (!shouldContinue()) {
+    const e = new Error(PROCESS_CANCELLED);
+    e.code = "PROCESS_CANCELLED";
+    throw e;
+  }
+}
+
+async function randomDelay(min, max, shouldContinue = () => true) {
+  const total = Math.random() * (max - min) + min;
+  const step = 400;
+  let elapsed = 0;
+  while (elapsed < total) {
+    assertContinue(shouldContinue);
+    const chunk = Math.min(step, total - elapsed);
+    await new Promise((r) => setTimeout(r, chunk));
+    elapsed += chunk;
+  }
+}
+
+/** Прерывает ожидание Playwright при нажатии «Стоп» (memoryStore.isProcessing → false) */
+function raceWithCancel(playwrightPromise, shouldContinue) {
+  let intervalId;
+  const cancelPromise = new Promise((_, reject) => {
+    intervalId = setInterval(() => {
+      if (!shouldContinue()) {
+        clearInterval(intervalId);
+        reject(
+          Object.assign(new Error(PROCESS_CANCELLED), {
+            code: "PROCESS_CANCELLED",
+          })
+        );
+      }
+    }, 400);
+  });
+  return Promise.race([playwrightPromise, cancelPromise]).finally(() => {
+    clearInterval(intervalId);
+  });
+}
+
 export const processRow = async (row, options = {}, emitLog = null) => {
   const {
     loginUrl = "https://identity.rsv.ru/Registration?returnUrl=%2Fconnect%2Fauthorize%2Fcallback%3Fclient_id%3Drsv-moyastrana%26redirect_uri%3Dhttps%253A%252F%252Fcabinet.moyastrana.ru%252Frsv-auth%252F%26response_type%3Dcode%26scope%3Dopenid%2520profile%26code_challenge%3DIrWiNqN2a6LErDuSSjio_IXruOylczA9YIQ6VkA4-fI%26code_challenge_method%3DS256",
@@ -212,6 +254,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     humanDelayMax = 3000,
     externalEmail = null,
     externalEmailKey = null,
+    /** Вызывается из parse-stream: пока true — продолжаем строку; «Стоп» снимает флаг в memoryStore */
+    shouldContinue = () => true,
   } = options;
 
   let emailAddress, emailKey;
@@ -241,6 +285,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
   try {
     log("info", `🚀 Запуск браузера...`);
+    assertContinue(shouldContinue);
     cleanupPostShiftInbox();
     if (!externalEmail)
       log("info", `📧 Создана временная почта: ${emailAddress}`);
@@ -254,43 +299,46 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     await page.addInitScript(INIT_SCRIPTS);
 
     log("info", `🔗 Переход на ${loginUrl}`);
-    await page.goto(loginUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+    await raceWithCancel(
+      page.goto(loginUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      }),
+      shouldContinue
+    );
 
     // === Заполнение формы ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Фамилия"]) {
       log("info", `⌨️ Ввод фамилии...`);
       await typeHumanLike(page, familia, row["Фамилия"]);
     }
 
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Имя"]) {
       log("info", `⌨️ Ввод имени...`);
       await typeHumanLike(page, imya, row["Имя"]);
     }
 
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Отчество"]) {
       log("info", `⌨️ Ввод отчества...`);
       await typeHumanLike(page, otchestvo, row["Отчество"]);
     }
 
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Город"]) {
       log("info", `⌨️ Ввод города...`);
       await typeHumanLike(page, city, row["Город"]);
-      await randomDelay(500, 1000);
+      await randomDelay(500, 1000, shouldContinue);
       await page.keyboard.press("ArrowDown", { delay: 100 });
-      await randomDelay(100, 300);
+      await randomDelay(100, 300, shouldContinue);
       await page.keyboard.press("Enter", { delay: 100 });
       log("info", `✅ Город выбран: ${row["Город"]}`);
     }
 
     // === Дата рождения ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Дата рождения"]) {
       log("info", `⌨️ Ввод даты рождения...`);
       const birthDate = row["Дата рождения"].split(" ");
@@ -300,38 +348,38 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       // День
       await page.locator(`xpath=${birthDay}`).click({ delay: 200 });
-      await randomDelay(200, 500);
+      await randomDelay(200, 500, shouldContinue);
       const dayNum = parseInt(day, 10);
       if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
         for (let i = 0; i < dayNum; i++)
           await page.keyboard.press("ArrowDown", {
             delay: 50 + Math.random() * 50,
           });
-        await randomDelay(100, 300);
+        await randomDelay(100, 300, shouldContinue);
         await page.keyboard.press("Enter", { delay: 100 });
         log("info", `✅ День выбран: ${dayNum}`);
       }
       // Месяц
       if (month) {
-        await randomDelay(200, 400);
+        await randomDelay(200, 400, shouldContinue);
         await page.locator(`xpath=${birthMonth}`).click({ delay: 200 });
-        await randomDelay(200, 500);
+        await randomDelay(200, 500, shouldContinue);
         const monthNum = parseInt(month, 10);
         if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
           for (let i = 0; i < monthNum; i++)
             await page.keyboard.press("ArrowDown", {
               delay: 50 + Math.random() * 50,
             });
-          await randomDelay(100, 300);
+          await randomDelay(100, 300, shouldContinue);
           await page.keyboard.press("Enter", { delay: 100 });
           log("info", `✅ Месяц выбран: ${monthNum}`);
         }
       }
       // Год
       if (year) {
-        await randomDelay(200, 400);
+        await randomDelay(200, 400, shouldContinue);
         await page.locator(`xpath=${birthYear}`).click({ delay: 200 });
-        await randomDelay(200, 500);
+        await randomDelay(200, 500, shouldContinue);
         const yearNum = parseInt(year, 10);
         if (!isNaN(yearNum)) {
           const yearIndex = 2024 - yearNum;
@@ -339,7 +387,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
             await page.keyboard.press("ArrowDown", {
               delay: 30 + Math.random() * 30,
             });
-          await randomDelay(100, 300);
+          await randomDelay(100, 300, shouldContinue);
           await page.keyboard.press("Enter", { delay: 100 });
           log("info", `✅ Год выбран: ${yearNum}`);
         }
@@ -347,14 +395,14 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     }
 
     // === Почта ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (emailAddress) {
       log("info", `⌨️ Ввод почты: ${emailAddress}`);
       await typeHumanLike(page, emailField, emailAddress);
     }
 
     // === Пароль ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Пароль"]) {
       log("info", `⌨️ Ввод пароля...`);
       await typeHumanLike(page, passwordField, row["Пароль"]);
@@ -362,12 +410,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     }
 
     // === Чекбокс ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🖱️ Клик по чекбоксу...`);
     await page.locator(`xpath=${checkBoxOne}`).click({ delay: 200 });
 
     // === Капча ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🔍 Проверка капчи...`);
     if (
       await page.isVisible("#yandexSmartCaptchaContainer", { timeout: 3000 })
@@ -387,12 +435,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       if (tokenAppeared) log("info", `✅ Капча пройдена`);
       else {
         log("warn", `⚠️ Капча не пройдена автоматически`);
-        await randomDelay(5000, 10000);
+        await randomDelay(5000, 10000, shouldContinue);
       }
     }
 
     // === Отправка ===
-    await randomDelay(humanDelayMin, humanDelayMax);
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🖱️ Клик по "Продолжить"...`);
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
 
@@ -400,22 +448,30 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     log("info", `⏳ Ожидание перехода на страницу подтверждения...`);
     try {
       const encodedEmail = encodeURIComponent(emailAddress);
-      await page.waitForURL(
-        (url) =>
-          url.href.includes("/Registration/Confirmation") &&
-          url.href.includes(`PhoneOrEmail=${encodedEmail}`),
-        { timeout: 30000, waitUntil: "load" }
+      await raceWithCancel(
+        page.waitForURL(
+          (url) =>
+            url.href.includes("/Registration/Confirmation") &&
+            url.href.includes(`PhoneOrEmail=${encodedEmail}`),
+          { timeout: 30000, waitUntil: "load" }
+        ),
+        shouldContinue
       );
       log("success", `✅ Страница подтверждения загружена`);
     } catch (err) {
+      if (err?.code === "PROCESS_CANCELLED") throw err;
       log("warn", `⚠️ Не удалось дождаться по email, пробуем общий паттерн...`);
       try {
-        await page.waitForURL(
-          (url) => url.href.includes("/Registration/Confirmation"),
-          { timeout: 15000, waitUntil: "domcontentloaded" }
+        await raceWithCancel(
+          page.waitForURL(
+            (url) => url.href.includes("/Registration/Confirmation"),
+            { timeout: 15000, waitUntil: "domcontentloaded" }
+          ),
+          shouldContinue
         );
         log("success", `✅ Страница подтверждения загружена (общий паттерн)`);
       } catch (err2) {
+        if (err2?.code === "PROCESS_CANCELLED") throw err2;
         log("error", `❌ Не удалось дождаться: ${err2.message}`);
       }
     }
@@ -431,6 +487,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     const pollInterval = 3000; // 3 секунды между попытками
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      assertContinue(shouldContinue);
       try {
         const messages = await getPostShiftMessages(emailKey);
 
@@ -472,7 +529,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       }
 
       if (attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, pollInterval));
+        await randomDelay(pollInterval, pollInterval, shouldContinue);
       }
     }
 
@@ -487,7 +544,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
     // === Ввод кода ===
     if (code) {
-      await randomDelay(humanDelayMin, humanDelayMax);
+      await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
       log("info", `⌨️ Ввод кода: ${code}`);
 
       await page
@@ -499,20 +556,26 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       await typeHumanLike(page, secondInput, code);
 
-      await randomDelay(humanDelayMin, humanDelayMax);
+      await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
       log("info", `🖱️ Клик по "Подтвердить"...`);
       await page.locator(`xpath=${secondSubmitButton}`).click({ delay: 200 });
 
-      await page
-        .waitForURL(
-          (url) =>
-            url.href.includes("cabinet.moyastrana.ru") ||
-            url.href.includes("/Account/Login"),
-          { timeout: 30000 }
-        )
-        .catch(() => log("warn", `⚠️ Таймаут редиректа`));
+      try {
+        await raceWithCancel(
+          page.waitForURL(
+            (url) =>
+              url.href.includes("cabinet.moyastrana.ru") ||
+              url.href.includes("/Account/Login"),
+            { timeout: 30000 }
+          ),
+          shouldContinue
+        );
+      } catch (e) {
+        if (e?.code === "PROCESS_CANCELLED") throw e;
+        log("warn", `⚠️ Таймаут редиректа`);
+      }
 
-      await randomDelay(5000, 7000);
+      await randomDelay(5000, 7000, shouldContinue);
 
       // 🔥 ОЧИСТКА ПОЧТЫ ПОСЛЕ УСПЕШНОГО ВВОДА
       log("info", `🧹 Очистка временной почты ${emailAddress}...`);
@@ -541,6 +604,17 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       url: finalUrl,
     };
   } catch (err) {
+    if (err?.code === "PROCESS_CANCELLED" || err?.message === PROCESS_CANCELLED) {
+      log("warn", "🛑 Остановлено пользователем (кнопка «Стоп»)");
+      return {
+        success: false,
+        cancelled: true,
+        row,
+        email: emailAddress,
+        emailId: emailKey,
+        timestamp: new Date().toISOString(),
+      };
+    }
     log("error", `❌ Ошибка: ${err.message}`, { stack: err.stack });
     return {
       success: false,
@@ -561,11 +635,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     }
   }
 };
-
-const randomDelay = (min, max) =>
-  new Promise((resolve) =>
-    setTimeout(resolve, Math.random() * (max - min) + min)
-  );
 
 const typeHumanLike = async (page, xpath, text) => {
   const locator = page.locator(`xpath=${xpath}`);
