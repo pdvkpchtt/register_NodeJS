@@ -40,36 +40,19 @@ router.post("/parse-stream/stop", (req, res) => {
   });
 });
 
-// 🔥 GET /parse-stream — ГЛАВНЫЙ РОУТ
-router.get("/parse-stream", async (req, res) => {
+/**
+ * Фоновая обработка: не привязана к HTTP-запросу (перезагрузка вкладки не отменяет цикл).
+ * Останавливается только через POST /parse-stream/stop.
+ */
+async function runParseJob(app) {
+  const getIo = () => app.get("socketio");
+
   try {
-    if (memoryStore.isProcessing()) {
-      return res.status(409).json({
-        error: "Процесс уже запущен",
-        stats: memoryStore.getProcessing().stats,
-      });
-    }
-    if (!memoryStore.hasFile()) {
-      return res.status(404).json({ error: "Файл не найден" });
-    }
-
-    memoryStore.setProcessing({
-      isActive: true,
-      startedAt: new Date().toISOString(),
-      stats: { total: 0, success: 0, failed: 0, processed: 0 },
-    });
-
     const file = memoryStore.getFile();
     const batchSize = 1;
     const durationMinutes = parseInt(memoryStore.getSetting("duration")) || 0;
     const cooldownMs = durationMinutes > 0 ? durationMinutes * 60 * 1000 : 0;
 
-    let isCancelled = false;
-    req.on("close", () => {
-      isCancelled = true;
-    });
-
-    // 🔥 Читаем файл для записи
     const workbookWrite = XLSX.read(file.buffer, {
       type: "buffer",
       cellText: true,
@@ -79,7 +62,6 @@ router.get("/parse-stream", async (req, res) => {
     const fullRange = XLSX.utils.decode_range(worksheetWrite["!ref"]);
     const endRow = fullRange.e.r;
 
-    // 🔥 Заголовки
     const headerRow = XLSX.utils.sheet_to_json(worksheetWrite, {
       range: { s: { r: 0, c: fullRange.s.c }, e: { r: 0, c: fullRange.e.c } },
       header: 1,
@@ -89,7 +71,6 @@ router.get("/parse-stream", async (req, res) => {
       h ? String(h).trim() : `column_${i}`
     );
 
-    // 🔥 Поиск колонок
     const completedColIndex = headers.findIndex(
       (h) => h?.trim().toLowerCase() === "завершен"
     );
@@ -103,7 +84,7 @@ router.get("/parse-stream", async (req, res) => {
         h?.trim().toLowerCase() === "индекс почты" ||
         h?.trim().toLowerCase() === "emailid" ||
         h?.trim().toLowerCase() === "id почты"
-    ); // 🔥 Новая колонка
+    );
 
     console.log(`📊 Файл: ${file.originalname}, строк: ${endRow}`);
     console.log(
@@ -117,22 +98,21 @@ router.get("/parse-stream", async (req, res) => {
       }`
     );
 
-    // 🔥 Хелперы
     const emitLog = (level, message, meta = {}) => {
-      const io = req.app.get("socketio");
+      const io = getIo();
       const logData = {
         level,
         message,
         ...meta,
         timestamp: new Date().toISOString(),
       };
-      if (io && io.sockets?.sockets?.size > 0) io.emit("process-log", logData);
+      if (io) io.emit("process-log", logData);
       memoryStore.addLog(logData);
       console.log(`[${level}] ${message}`, meta);
     };
 
     const emitProgress = (processed, total, success, failed) => {
-      const io = req.app.get("socketio");
+      const io = getIo();
       const data = {
         percent: total > 0 ? Math.round((processed / total) * 100) : 0,
         processed,
@@ -141,8 +121,7 @@ router.get("/parse-stream", async (req, res) => {
         failed,
         timestamp: new Date().toISOString(),
       };
-      if (io && io.sockets?.sockets?.size > 0)
-        io.emit("process-progress", data);
+      if (io) io.emit("process-progress", data);
       memoryStore.setProcessing({
         stats: { ...memoryStore.getProcessing().stats, ...data },
       });
@@ -168,23 +147,37 @@ router.get("/parse-stream", async (req, res) => {
     };
 
     const startRow = 1;
+    const totalRows = endRow - startRow + 1;
     const results = { success: 0, failed: 0, rows: [] };
+
+    memoryStore.setProcessing({
+      stats: {
+        ...memoryStore.getProcessing().stats,
+        total: totalRows,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        percent: 0,
+      },
+    });
 
     emitLog("info", `🚀 Старт: ${file.originalname}`, {
       cooldown: cooldownMs ? `${durationMinutes} мин` : "нет",
     });
 
-    const io = req.app.get("socketio");
-    if (io)
+    const io = getIo();
+    if (io) {
       io.emit("process-started", {
         filename: file.originalname,
         totalRows: endRow,
         timestamp: new Date().toISOString(),
       });
+    }
 
-    // 🔄 Цикл по строкам
+    emitProgress(0, totalRows, 0, 0);
+
     for (let start = startRow; start <= endRow; start += batchSize) {
-      if (isCancelled || !memoryStore.isProcessing()) {
+      if (!memoryStore.isProcessing()) {
         emitLog("warn", "⚠️ Прервано");
         break;
       }
@@ -202,13 +195,12 @@ router.get("/parse-stream", async (req, res) => {
       let wasProcessed = false;
 
       for (const row of chunkData) {
-        if (isCancelled || !memoryStore.isProcessing()) break;
+        if (!memoryStore.isProcessing()) break;
 
         const userName =
           row["ФАМИЛИЯ"] || row["Фамилия"] || `Row #${start + 1}`;
         const excelRowIndex = start;
 
-        // ✅ ПРОВЕРКА 1: Уже завершена? → пропускаем
         if (completedColIndex !== -1) {
           const cellRef = XLSX.utils.encode_cell({
             r: excelRowIndex,
@@ -228,7 +220,6 @@ router.get("/parse-stream", async (req, res) => {
           }
         }
 
-        // 📧 ПРОВЕРКА 2: Есть ли почта?
         let emailAddress = null;
         let shouldGenerateEmail = true;
 
@@ -252,17 +243,14 @@ router.get("/parse-stream", async (req, res) => {
           email: emailAddress || "новая",
         });
 
-        // 🔥 Вызов processRow
         const result = await processRow(
           row,
           { externalEmail: shouldGenerateEmail ? null : emailAddress },
           emitLog
         );
 
-        // ✏️ ОБНОВЛЕНИЕ ФАЙЛА
         let fileChanged = false;
 
-        // 1. Записываем почту, если сгенерировали новую
         if (shouldGenerateEmail && result.email && emailColIndex !== -1) {
           const emailCellRef = XLSX.utils.encode_cell({
             r: excelRowIndex,
@@ -273,7 +261,6 @@ router.get("/parse-stream", async (req, res) => {
           fileChanged = true;
         }
 
-        // 🔥 2. Записываем emailId в колонку "Индекс почты"
         if (shouldGenerateEmail && result.emailId && emailIdColIndex !== -1) {
           const emailIdCellRef = XLSX.utils.encode_cell({
             r: excelRowIndex,
@@ -284,7 +271,6 @@ router.get("/parse-stream", async (req, res) => {
           fileChanged = true;
         }
 
-        // 3. Записываем "да" при успехе
         if (result.success && completedColIndex !== -1) {
           const completedCellRef = XLSX.utils.encode_cell({
             r: excelRowIndex,
@@ -295,7 +281,6 @@ router.get("/parse-stream", async (req, res) => {
           fileChanged = true;
         }
 
-        // 3. Сохраняем в память
         if (fileChanged) updateFileInMemory();
 
         await new Promise((r) => setTimeout(r, 100));
@@ -311,36 +296,38 @@ router.get("/parse-stream", async (req, res) => {
         await new Promise((resolve) => setImmediate(resolve));
 
       const processed = start - startRow + 1;
-      const total = endRow - startRow + 1;
-      emitProgress(processed, total, results.success, results.failed);
+      emitProgress(processed, totalRows, results.success, results.failed);
 
-      // 😴 Кулдаун
       if (cooldownMs > 0 && wasProcessed && start <= endRow) {
         emitLog("info", `😴 Пауза ${durationMinutes} мин...`);
         await new Promise((resolve) => {
           const timeout = setTimeout(resolve, cooldownMs);
           const checkCancel = setInterval(() => {
-            if (isCancelled || !memoryStore.isProcessing()) {
+            if (!memoryStore.isProcessing()) {
               clearTimeout(timeout);
               clearInterval(checkCancel);
               resolve();
             }
           }, 1000);
         });
-        if (isCancelled) break;
+        if (!memoryStore.isProcessing()) break;
       }
     }
 
-    // 💾 Финальное сохранение
     updateFileInMemory();
     emitLog("success", `💾 Файл сохранён`);
+
+    if (!memoryStore.isProcessing()) {
+      return;
+    }
 
     const finalMessage = `✅ Готово! Успешно: ${results.success}, Ошибок: ${results.failed}`;
     emitLog("success", finalMessage);
     memoryStore.stopProcessing();
 
-    if (io)
-      io.emit("process-stopped", {
+    const ioFinal = getIo();
+    if (ioFinal) {
+      ioFinal.emit("process-stopped", {
         reason: "completed",
         stats: {
           total: results.rows.length,
@@ -349,21 +336,12 @@ router.get("/parse-stream", async (req, res) => {
         },
         timestamp: new Date().toISOString(),
       });
-
-    res.json({
-      success: true,
-      message: "Обработка завершена",
-      stats: {
-        total: results.rows.length,
-        success: results.success,
-        failed: results.failed,
-      },
-    });
+    }
   } catch (err) {
     console.error("❌ Ошибка:", err);
     memoryStore.stopProcessing();
-    const io = req.app.get("socketio");
-    if (io?.sockets?.sockets?.size > 0) {
+    const io = getIo();
+    if (io) {
       io.emit("process-stopped", {
         reason: "error",
         error: err.message,
@@ -375,7 +353,52 @@ router.get("/parse-stream", async (req, res) => {
         timestamp: new Date().toISOString(),
       });
     }
-    res.status(500).json({ error: err.message });
+  }
+}
+
+// 🔥 GET /parse-stream — запуск фоновой обработки (ответ сразу, цикл не привязан к клиенту)
+router.get("/parse-stream", async (req, res) => {
+  try {
+    if (memoryStore.isProcessing()) {
+      return res.status(409).json({
+        error: "Процесс уже запущен",
+        stats: memoryStore.getProcessing().stats,
+      });
+    }
+    if (!memoryStore.hasFile()) {
+      return res.status(404).json({ error: "Файл не найден" });
+    }
+
+    memoryStore.setProcessing({
+      isActive: true,
+      startedAt: new Date().toISOString(),
+      stats: { total: 0, success: 0, failed: 0, processed: 0 },
+    });
+
+    const app = req.app;
+    setImmediate(() => {
+      runParseJob(app).catch((err) => {
+        console.error("❌ runParseJob:", err);
+        memoryStore.stopProcessing();
+        const io = app.get("socketio");
+        if (io) {
+          io.emit("process-stopped", {
+            reason: "error",
+            error: err.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+    });
+
+    return res.status(202).json({
+      success: true,
+      message: "Обработка запущена",
+    });
+  } catch (err) {
+    console.error("❌ Ошибка:", err);
+    memoryStore.stopProcessing();
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -6,7 +6,6 @@
   "scripts": {
     "preinstall": "rm -rf node_modules/.package-lock.json 2>/dev/null || true",
     "postinstall": "npx playwright install chromium",
-    "predev": "npm install",
     "dev": "nodemon --watch . --ext js,mjs,cjs,ts,json --exec \"node --experimental-transform-types index.js\"",
     "start": "node index.js",
     "prisma:generate": "prisma generate",
