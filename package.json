@@ -4,12 +4,16 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "postinstall": "node scripts/preflight-playwright.mjs",
-    "predev": "node scripts/preflight-playwright.mjs",
+    "preinstall": "rm -rf node_modules/.package-lock.json 2>/dev/null || true",
+    "postinstall": "npx playwright install chromium",
+    "predev": "npm install",
     "dev": "nodemon --watch . --ext js,mjs,cjs,ts,json --exec \"node --experimental-transform-types index.js\"",
-    "start": "node --experimental-transform-types index.js",
+    "start": "node index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [],
   "author": "",
