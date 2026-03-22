@@ -1,8 +1,30 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { memoryStore } from "./src/storage/memoryStore.js";
+
+/** Локальная разработка + origin из .env / панели хостинга (через запятую) */
+function getAllowedOrigins() {
+  const defaults = ["http://localhost:5173", "http://127.0.0.1:5173"];
+  const raw = [process.env.FRONT_ORIGIN, process.env.CORS_ORIGINS]
+    .filter(Boolean)
+    .join(",");
+  const fromEnv = raw
+    .split(",")
+    .map((s) => s.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  return [...new Set([...defaults, ...fromEnv])];
+}
+
+const allowedOrigins = getAllowedOrigins();
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  const normalized = origin.replace(/\/$/, "");
+  return allowedOrigins.includes(normalized);
+}
 
 import indexRoutes from "./src/routes/index.js";
 import parseRoutes from "./src/routes/parse.js";
@@ -28,13 +50,12 @@ const io = new Server(httpServer, {
     origin: (origin, callback) => {
       // 🔥 Разрешаем запросы без origin (curl, Postman, внутренние вызовы)
       if (!origin) return callback(null, true);
-      
-      const allowed = ["http://localhost:5173", process.env.FRONT_ORIGIN].filter(Boolean);
-      
-      if (allowed.includes(origin)) {
+
+      if (isOriginAllowed(origin)) {
         callback(null, true);
       } else {
         console.warn(`❌ CORS blocked: ${origin}`);
+        console.warn(`   Укажите в FRONT_ORIGIN или CORS_ORIGINS (через запятую), сейчас: ${allowedOrigins.join(", ")}`);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -47,9 +68,8 @@ const io = new Server(httpServer, {
 // 🔥 Глобальный CORS middleware для REST API (дублируем для надёжности)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowed = ["http://localhost:5173", process.env.FRONT_ORIGIN].filter(Boolean);
-  
-  if (!origin || allowed.includes(origin)) {
+
+  if (!origin || isOriginAllowed(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin || "*");
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
@@ -108,9 +128,14 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 4001;
 
-httpServer.listen(PORT, "0.0.0.0", () => {  // 🔥 Слушаем на всех интерфейсах
+httpServer.listen(PORT, "0.0.0.0", () => {
+  // 🔥 Слушаем на всех интерфейсах
   console.log(`✅ service_auth on port ${PORT}`);
-  console.log(`🔌 Socket.IO: ws://localhost:${PORT}`);
+  const publicUrl = process.env.PUBLIC_URL || "";
+  console.log(
+    `🔌 Socket.IO: ${publicUrl ? `wss://${publicUrl.replace(/^https?:\/\//, "")}` : `ws://localhost:${PORT}`}`
+  );
+  console.log(`🌐 CORS allowed origins: ${allowedOrigins.join(", ")}`);
 });
 
 export { io };
