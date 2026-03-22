@@ -4,6 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
+    "predev": "npm install && npx playwright install chromium",
     "dev": "nodemon --watch . --ext js,mjs,cjs,ts,json --exec \"node --experimental-transform-types index.js\"",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push"
