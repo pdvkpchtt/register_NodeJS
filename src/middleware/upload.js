@@ -28,8 +28,19 @@ export const upload = multer({
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "application/vnd.ms-excel",
     ];
+    const name = (file.originalname || "").toLowerCase();
+    const looksExcel =
+      name.endsWith(".xlsx") ||
+      name.endsWith(".xlsm") ||
+      name.endsWith(".xls");
 
-    if (allowedMimes.includes(file.mimetype)) {
+    // Браузеры/ОС часто шлют .xlsx как application/octet-stream
+    const mimeOk =
+      allowedMimes.includes(file.mimetype) ||
+      (file.mimetype === "application/octet-stream" && looksExcel) ||
+      ((!file.mimetype || file.mimetype === "") && looksExcel);
+
+    if (mimeOk) {
       cb(null, true);
     } else {
       cb(new Error("Только .xlsx файлы разрешены"), false);

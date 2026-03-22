@@ -8,6 +8,12 @@ const router = Router();
 // POST /upload — загрузка файла
 router.post("/upload", upload.single("file"), (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: "Файл не получен (ожидается поле file)",
+      });
+    }
+
     console.log("=== 📁 Получен файл ===");
     console.log("Имя файла:", req.file?.originalname);
     console.log("MIME-тип:", req.file?.mimetype);
