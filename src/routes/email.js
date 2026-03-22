@@ -1,89 +1,66 @@
 import { Router } from "express";
-import { MailSlurp } from "mailslurp-client";
-import "dotenv/config";
-import * as cheerio from "cheerio"; // Установите: npm install cheerio
+import axios from "axios";
 
 const router = Router();
 
-// Функция для извлечения кода из HTML
-function extractVerificationCode(htmlContent) {
-  // Загружаем HTML в cheerio
-  const $ = cheerio.load(htmlContent);
+const POST_SHIFT_HASH = process.env.POST_SHIFT_HASH;
 
-  // Ищем текст, содержащий фразу с кодом
-  const text = $("body").text();
-
-  // Регулярное выражение для поиска кода (4 цифры после фразы)
-  const regex =
-    /Для подтверждения регистрации учетной записи введи код подтверждения\.\s*(\d{4})/;
-  const match = text.match(regex);
-
-  if (match) {
-    const fullPhrase = match[0]; // Полная фраза с кодом
-    const code = match[1]; // Только код (1066)
-
-    return {
-      fullPhrase,
-      code,
-      success: true,
-    };
-  }
-
-  return {
-    success: false,
-    message: "Код подтверждения не найден",
-  };
-}
-
-// GET
+// 🔹 GET / — создать почту и вывести содержимое ящика (просто JSON)
 router.get("/email", async (req, res) => {
-  const mailslurp = new MailSlurp({
-    apiKey: process.env.EMAIL_API,
-    timeout: 30000,
-  });
-
-  const emailPagination = await mailslurp.emailController.getEmailsPaginated({
-    inboxId: "26483136-dcce-4da9-a937-5fd9e22f7b0e",
-    sort: "DESC",
-    page: 0,
-    size: 10,
-  });
-
-  const emails = emailPagination.content || [];
-
-  console.log(`📨 Писем в инбоксе: ${emails.length}`);
-
-  if (emails.length > 0) {
-    for (let i = 0; i < emails.length; i++) {
-      const email = emails[i];
-
-      // Получаем полное письмо
-      const fullEmail = await mailslurp.emailController.getEmail({
-        emailId: email.id,
-      });
-
-      console.log(`\n📧 Письмо ${i + 1}:`);
-      console.log(`   От: ${fullEmail.from}`);
-      console.log(`   Тема: ${fullEmail.subject}`);
-
-      // Извлекаем код подтверждения
-      const result = extractVerificationCode(fullEmail.body);
-
-      if (result.success) {
-        console.log(`   ✅ Найдена фраза: "${result.fullPhrase}"`);
-        console.log(`   🔑 Код подтверждения: ${result.code}`);
-
-        // Здесь можно сохранить код в базу данных или использовать дальше
-        // await saveVerificationCode(result.code);
-      } else {
-        console.log(`   ❌ ${result.message}`);
-      }
+  try {
+    if (!POST_SHIFT_HASH) {
+      return res
+        .status(500)
+        .json({ error: "POST_SHIFT_HASH не настроен в .env" });
     }
-  } else {
-    console.log("   (пока нет писем)");
-  }
 
-  res.send("ok");
+    // 1️⃣ Генерируем случайное имя для почты
+    const emailName = `user${Math.random().toString(36).substring(2, 8)}`;
+
+    // 2️⃣ Создаем временную почту через API post-shift.ru
+    const createRes = await axios.get("https://post-shift.ru/api.php", {
+      params: {
+        action: "new",
+        hash: POST_SHIFT_HASH,
+        name: emailName,
+        domain: "post-shift.ru",
+      },
+      timeout: 10000,
+    });
+
+    const { email, key } = createRes.data;
+    if (!email || !key) {
+      return res
+        .status(500)
+        .json({ error: "Не удалось создать почту", raw: createRes.data });
+    }
+
+    // 3️⃣ Получаем список писем
+    const messagesRes = await axios.get("https://post-shift.ru/api.php", {
+      params: {
+        action: "getlist",
+        hash: POST_SHIFT_HASH,
+        key,
+      },
+      timeout: 10000,
+    });
+
+    const messages = Array.isArray(messagesRes.data) ? messagesRes.data : [];
+
+    // 4️⃣ 🔥 Возвращаем ПРОСТОЙ JSON — без верстки
+    res.json({
+      email,
+      key,
+      messages,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("❌ Ошибка:", err.message);
+    res.status(500).json({
+      error: "Ошибка при работе с почтой",
+      details: err.response?.data || err.message,
+    });
+  }
 });
 
 export default router;

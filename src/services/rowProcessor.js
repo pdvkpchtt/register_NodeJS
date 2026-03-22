@@ -1,42 +1,177 @@
 import { chromium } from "playwright-extra";
 import stealth from "puppeteer-extra-plugin-stealth";
-import { MailSlurp } from "mailslurp-client";
+import axios from "axios";
 import "dotenv/config";
 import * as cheerio from "cheerio";
 
-// Функция для извлечения кода из HTML
+// 🔥 Функция для извлечения кода из HTML
 function extractVerificationCode(htmlContent) {
-  // Загружаем HTML в cheerio
-  const $ = cheerio.load(htmlContent);
-
-  const text = $("body").text();
-
-  // Регулярное выражение для поиска кода (4 цифры после фразы)
-  const regex =
-    /Для подтверждения регистрации учетной записи введи код подтверждения\.\s*(\d{4})/;
-  const match = text.match(regex);
-
-  if (match) {
-    const fullPhrase = match[0]; // Полная фраза с кодом
-    const code = match[1]; // Только код (1066)
-
+  if (!htmlContent || htmlContent.trim().length < 10) {
+    console.log(
+      `⚠️ Пустой или слишком короткий контент: "${htmlContent?.substring(
+        0,
+        100
+      )}"`
+    );
     return {
-      fullPhrase,
-      code,
-      success: true,
+      success: false,
+      message: "Пустой контент",
+      preview: htmlContent?.substring(0, 200),
     };
   }
 
+  const $ = cheerio.load(htmlContent);
+  const text = $("body").text().replace(/\s+/g, " ").trim();
+
+  console.log(`🔍 Парсим текст письма: "${text.substring(0, 300)}..."`);
+
+  const patterns = [
+    /(?:код|code|confirmation|подтверждения)[^:\d]*[:\s]*([A-Z0-9]{4,6})/i,
+    /([0-9]{6})/,
+    /([A-Z0-9]{4,6})/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const code = match[1].trim().toUpperCase();
+      if (
+        code.length >= 4 &&
+        code.length <= 6 &&
+        !code.includes("HTTP") &&
+        !code.includes("WWW")
+      ) {
+        console.log(`✅ Код найден: ${code}`);
+        return { code, success: true };
+      }
+    }
+  }
+
+  console.log(`⚠️ Код не найден в тексте. Доступные паттерны не сработали.`);
   return {
     success: false,
     message: "Код подтверждения не найден",
+    preview: text.substring(0, 200),
   };
+}
+
+// 🔥 Создание временной почты через post-shift.ru
+async function createPostShiftEmail(name = null, domain = "post-shift.ru") {
+  const hash = process.env.POST_SHIFT_HASH;
+  if (!hash) throw new Error("POST_SHIFT_HASH не настроен в .env");
+
+  const emailName =
+    name ||
+    `user${Math.random().toString(36).substring(2, 8)}`.substring(0, 10);
+
+  const response = await axios.get("https://post-shift.ru/api.php", {
+    params: {
+      action: "new",
+      hash,
+      name: emailName,
+      domain,
+    },
+    timeout: 10000,
+  });
+
+  const { email, key } = response.data;
+  if (!email || !key) {
+    throw new Error(
+      `Не удалось создать почту: ${JSON.stringify(response.data)}`
+    );
+  }
+  return { email, key };
+}
+
+// 🔥 Получение списка писем
+async function getPostShiftMessages(key) {
+  const hash = process.env.POST_SHIFT_HASH;
+
+  try {
+    const response = await axios.get("https://post-shift.ru/api.php", {
+      params: {
+        action: "getlist",
+        hash,
+        key,
+      },
+      timeout: 10000,
+    });
+
+    // 🔥 Лог для отладки
+    console.log(`📡 getlist ответ:`, {
+      status: response.status,
+      data: response.data,
+      isArray: Array.isArray(response.data),
+    });
+
+    // API может вернуть объект с ошибкой
+    if (response.data?.error) {
+      console.warn(`⚠️ API ошибка getlist: ${response.data.error}`);
+      return [];
+    }
+
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (err) {
+    console.error(`❌ getlist failed:`, err.response?.data || err.message);
+    return [];
+  }
+}
+
+// 🔥 Получение текста письма
+async function getPostShiftMessage(key, messageId) {
+  const hash = process.env.POST_SHIFT_HASH;
+
+  try {
+    // 🔥 Сначала пробуем с forced=1 (без cut и base64)
+    const response = await axios.get("https://post-shift.ru/api.php", {
+      params: {
+        action: "getmail",
+        hash,
+        key,
+        id: messageId,
+        forced: 1, // 🔥 КЛЮЧЕВОЙ ПАРАМЕТР: возвращает письмо без обработки
+      },
+      timeout: 10000,
+    });
+
+    console.log(`📡 getmail #${messageId} ответ:`, {
+      status: response.status,
+      hasMessage: !!response.data?.message,
+      fullResponse: response.data, // 🔥 Логим весь ответ для отладки
+    });
+
+    // 🔥 Проверяем разные возможные поля в ответе
+    const message =
+      response.data?.message ||
+      response.data?.text ||
+      response.data?.body ||
+      response.data?.content ||
+      "";
+
+    return message;
+  } catch (err) {
+    console.error(`❌ getmail failed:`, err.response?.data || err.message);
+    return "";
+  }
+}
+
+// 🔥 Очистка/удаление ящика
+async function cleanupPostShiftInbox() {
+  try {
+    await axios.get("https://post-shift.ru/api.php?action=deleteall");
+
+    console.log(`🗑️ Ящики удалены`);
+    return true;
+  } catch (err) {
+    console.warn(`⚠️ Не удалось удалить ящики`);
+    return false;
+  }
 }
 
 chromium.use(stealth());
 
 const BROWSER_CONFIG = {
-  headless: true,  // 🔥 Меняем false → true (или "new" для нового режима)
+  headless: false,
   viewport: { width: 1920, height: 1080 },
   userAgent:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -46,10 +181,6 @@ const BROWSER_CONFIG = {
     "--no-sandbox",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
-    // 🔥 Дополнительные флаги для стабильного headless-режима:
-    "--disable-gpu",           // Отключаем GPU (не нужен в headless)
-    "--disable-software-rasterizer",
-    "--disable-setuid-sandbox",
   ],
 };
 
@@ -75,25 +206,23 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     passwordRepeatField = "/html/body/div[4]/div[1]/div/div/div[3]/form/div[9]/input",
     checkBoxOne = '//*[@id="IsUserAgreementAccepted"]',
     submitButton = "/html/body/div[4]/div[1]/div/div/div[3]/form/div[12]/button",
-
     secondInput = "/html/body/div[4]/div[1]/div/div/div/form/div[1]/input",
     secondSubmitButton = "/html/body/div[4]/div[1]/div/div/div/form/div[3]/button",
-
     humanDelayMin = 1000,
     humanDelayMax = 3000,
-    externalEmail = null, // 🔥 Опционально: использовать существующую почту
+    externalEmail = null,
+    externalEmailKey = null,
   } = options;
 
-  // Инициализация MailSlurp
-  const mailslurp = new MailSlurp({
-    apiKey: process.env.EMAIL_API,
-    timeout: 30000,
-  });
-
-  // 🔥 Создаём почту ТОЛЬКО если не передана externalEmail
-  const inbox = await mailslurp.inboxController.createInboxWithDefaults();
-  const emailAddress = inbox.emailAddress;
-  const emailId = inbox.id;
+  let emailAddress, emailKey;
+  if (externalEmail && externalEmailKey) {
+    emailAddress = externalEmail;
+    emailKey = externalEmailKey;
+  } else {
+    const postShift = await createPostShiftEmail();
+    emailAddress = postShift.email;
+    emailKey = postShift.key;
+  }
 
   const userName = row["Фамилия"] || row["ФАМИЛИЯ"] || "User";
   let browser;
@@ -112,6 +241,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
   try {
     log("info", `🚀 Запуск браузера...`);
+    cleanupPostShiftInbox();
     if (!externalEmail)
       log("info", `📧 Создана временная почта: ${emailAddress}`);
 
@@ -164,25 +294,23 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     if (row["Дата рождения"]) {
       log("info", `⌨️ Ввод даты рождения...`);
       const birthDate = row["Дата рождения"].split(" ");
-      const day = birthDate[0];
-      const month = birthDate[1];
-      const year = birthDate[2];
+      const day = birthDate[0],
+        month = birthDate[1],
+        year = birthDate[2];
 
       // День
       await page.locator(`xpath=${birthDay}`).click({ delay: 200 });
       await randomDelay(200, 500);
       const dayNum = parseInt(day, 10);
       if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
-        for (let i = 0; i < dayNum; i++) {
+        for (let i = 0; i < dayNum; i++)
           await page.keyboard.press("ArrowDown", {
             delay: 50 + Math.random() * 50,
           });
-        }
         await randomDelay(100, 300);
         await page.keyboard.press("Enter", { delay: 100 });
         log("info", `✅ День выбран: ${dayNum}`);
       }
-
       // Месяц
       if (month) {
         await randomDelay(200, 400);
@@ -190,17 +318,15 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         await randomDelay(200, 500);
         const monthNum = parseInt(month, 10);
         if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
-          for (let i = 0; i < monthNum; i++) {
+          for (let i = 0; i < monthNum; i++)
             await page.keyboard.press("ArrowDown", {
               delay: 50 + Math.random() * 50,
             });
-          }
           await randomDelay(100, 300);
           await page.keyboard.press("Enter", { delay: 100 });
           log("info", `✅ Месяц выбран: ${monthNum}`);
         }
       }
-
       // Год
       if (year) {
         await randomDelay(200, 400);
@@ -209,11 +335,10 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         const yearNum = parseInt(year, 10);
         if (!isNaN(yearNum)) {
           const yearIndex = 2024 - yearNum;
-          for (let i = 0; i < yearIndex; i++) {
+          for (let i = 0; i < yearIndex; i++)
             await page.keyboard.press("ArrowDown", {
               delay: 30 + Math.random() * 30,
             });
-          }
           await randomDelay(100, 300);
           await page.keyboard.press("Enter", { delay: 100 });
           log("info", `✅ Год выбран: ${yearNum}`);
@@ -251,7 +376,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       await page
         .locator("#yandexSmartCaptchaContainer")
         .click({ position: { x: 15, y: 15 }, delay: 100 });
-
       const tokenAppeared = await page
         .waitForFunction(
           () =>
@@ -260,10 +384,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           { timeout: 15000 }
         )
         .catch(() => null);
-
-      if (tokenAppeared) {
-        log("info", `✅ Капча пройдена`);
-      } else {
+      if (tokenAppeared) log("info", `✅ Капча пройдена`);
+      else {
         log("warn", `⚠️ Капча не пройдена автоматически`);
         await randomDelay(5000, 10000);
       }
@@ -274,81 +396,100 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     log("info", `🖱️ Клик по "Продолжить"...`);
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
 
-    // 🔥 === ОЖИДАНИЕ ПЕРЕХОДА НА СТРАНИЦУ ПОДТВЕРЖДЕНИЯ ===
+    // === Ожидание страницы подтверждения ===
     log("info", `⏳ Ожидание перехода на страницу подтверждения...`);
-
     try {
       const encodedEmail = encodeURIComponent(emailAddress);
-
-      // 🔥 ИСПРАВЛЕНИЕ: url.href вместо url
       await page.waitForURL(
         (url) =>
           url.href.includes("/Registration/Confirmation") &&
           url.href.includes(`PhoneOrEmail=${encodedEmail}`),
-        {
-          timeout: 30000,
-          waitUntil: "load",
-        }
+        { timeout: 30000, waitUntil: "load" }
       );
-
       log("success", `✅ Страница подтверждения загружена`);
     } catch (err) {
       log("warn", `⚠️ Не удалось дождаться по email, пробуем общий паттерн...`);
-
       try {
-        // 🔥 То же исправление здесь
         await page.waitForURL(
           (url) => url.href.includes("/Registration/Confirmation"),
-          {
-            timeout: 15000,
-            waitUntil: "domcontentloaded",
-          }
+          { timeout: 15000, waitUntil: "domcontentloaded" }
         );
         log("success", `✅ Страница подтверждения загружена (общий паттерн)`);
       } catch (err2) {
-        log(
-          "error",
-          `❌ Не удалось дождаться страницы подтверждения: ${err2.message}`
-        );
+        log("error", `❌ Не удалось дождаться: ${err2.message}`);
       }
     }
 
-    // 🔥 Обновляем currentUrl ПОСЛЕ ожидания
     const currentUrl = page.url();
     log("debug", `🔗 Текущий URL: ${currentUrl}`);
 
     // === Получение кода из почты ===
-    const emailPagination = await mailslurp.emailController.getEmailsPaginated({
-      inboxId: emailId,
-      sort: "DESC",
-      page: 0,
-      size: 10,
-    });
+    log("info", `📬 Проверка почты ${emailAddress}...`);
 
     let code = null;
-    const emails = emailPagination.content || [];
+    const maxAttempts = 30; // 🔥 90 секунд ожидания
+    const pollInterval = 3000; // 3 секунды между попытками
 
-    if (emails.length > 0) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const fullEmail = await mailslurp.emailController.getEmail({
-          emailId: emails[0].id,
-        });
-        const result = extractVerificationCode(fullEmail.body);
-        code = result.code;
-        if (code) log("info", `✅ Код из письма: ${code}`);
+        const messages = await getPostShiftMessages(emailKey);
+
+        log(
+          "debug",
+          `🔍 Попытка ${attempt}/${maxAttempts}: найдено писем: ${messages.length}`
+        );
+
+        if (messages.length > 0) {
+          log(
+            "info",
+            `✅ Письма получены: ${messages.map((m) => m.subject).join(", ")}`
+          );
+
+          const firstMessage = messages[0];
+          const fullText = await getPostShiftMessage(emailKey, firstMessage.id);
+
+          // 🔥 Лог полного текста для отладки
+          console.log(
+            `📄 Текст письма #${firstMessage.id}:`,
+            fullText.substring(0, 500)
+          );
+
+          const result = extractVerificationCode(fullText);
+          if (result.success) {
+            code = result.code;
+            log("info", `✅ Код найден: ${code}`);
+            break;
+          } else {
+            log(
+              "warn",
+              `⚠️ Код не распознан. Текст: "${fullText.substring(0, 200)}..."`,
+              result
+            );
+          }
+        }
       } catch (e) {
-        log("error", `❌ Не удалось получить код: ${e.message}`);
+        log("error", `❌ Ошибка при чтении почты: ${e.message}`);
       }
-    } else {
-      log("warn", `⚠️ Письма не найдены в инбоксе`);
+
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, pollInterval));
+      }
     }
 
-    // === Ввод кода подтверждения ===
+    if (!code) {
+      log(
+        "warn",
+        `⚠️ Код не получен после ${maxAttempts} попыток (${
+          (maxAttempts * pollInterval) / 1000
+        } сек)`
+      );
+    }
+
+    // === Ввод кода ===
     if (code) {
       await randomDelay(humanDelayMin, humanDelayMax);
       log("info", `⌨️ Ввод кода: ${code}`);
 
-      // Ждём появления поля ввода кода
       await page
         .waitForSelector(`xpath=${secondInput}`, {
           state: "visible",
@@ -362,7 +503,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       log("info", `🖱️ Клик по "Подтвердить"...`);
       await page.locator(`xpath=${secondSubmitButton}`).click({ delay: 200 });
 
-      // Ждём финального редиректа
       await page
         .waitForURL(
           (url) =>
@@ -370,19 +510,20 @@ export const processRow = async (row, options = {}, emitLog = null) => {
             url.href.includes("/Account/Login"),
           { timeout: 30000 }
         )
-        .catch(() => {
-          log("warn", `⚠️ Таймаут ожидания финального редиректа`);
-        });
+        .catch(() => log("warn", `⚠️ Таймаут редиректа`));
 
       await randomDelay(5000, 7000);
+
+      // 🔥 ОЧИСТКА ПОЧТЫ ПОСЛЕ УСПЕШНОГО ВВОДА
+      log("info", `🧹 Очистка временной почты ${emailAddress}...`);
+      await cleanupPostShiftInbox(emailKey, emailAddress, "clear");
     }
 
-    // === Финальная проверка успеха ===
+    // === Финальный результат ===
     const finalUrl = page.url();
     const success =
       finalUrl.includes("cabinet.moyastrana.ru") ||
       (finalUrl.includes("/Registration/Confirmation") && code !== null);
-
     log(
       success ? "success" : "warn",
       `🎯 Результат: ${
@@ -394,7 +535,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       success,
       row,
       email: emailAddress,
-      emailId: emailId,
+      emailId: emailKey,
       confirmationCode: code,
       timestamp: new Date().toISOString(),
       url: finalUrl,
@@ -404,12 +545,16 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     return {
       success: false,
       row,
-      email: emailAddress, // 🔥 Возвращаем почту даже при ошибке
-      emailId: emailId,
+      email: emailAddress,
+      emailId: emailKey,
       error: err.message,
       timestamp: new Date().toISOString(),
     };
   } finally {
+    // 🔥 Гарантированная очистка в фоне
+    if (emailKey && emailAddress) {
+      cleanupPostShiftInbox(emailKey, emailAddress, "clear").catch(() => {});
+    }
     if (browser) {
       await browser.close();
       log("info", `🔚 Браузер закрыт`);
@@ -425,9 +570,8 @@ const randomDelay = (min, max) =>
 const typeHumanLike = async (page, xpath, text) => {
   const locator = page.locator(`xpath=${xpath}`);
   await locator.focus();
-  for (const char of text) {
+  for (const char of text)
     await locator.pressSequentially(char, { delay: Math.random() * 50 + 25 });
-  }
 };
 
 export default { processRow };
