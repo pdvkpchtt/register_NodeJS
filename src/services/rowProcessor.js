@@ -126,11 +126,22 @@ function unwrapData(obj) {
 }
 
 function makeInboxAddress(local, domain) {
+  // 🔥 Если local пустой — генерируем уникальный, но читаемый идентификатор
+  if (!local || String(local).trim() === '') {
+    local = `user${Date.now().toString(36)}${Math.random().toString(36).substring(2, 5)}`;
+  }
+  
+  // 🔥 Санитизация: только латиница, цифры, . _ -
   const safeLocal = String(local)
     .toLowerCase()
-    .replace(/[^a-z0-9._-]/g, "")
-    .slice(0, 24);
+    .replace(/[^a-z0-9._-]/g, '')  // Удаляем всё лишнее
+    .replace(/^[._-]+|[._-]+$/g, '')  // Убираем спецсимволы по краям
+    .replace(/\.{2,}/g, '.')  // Заменяем множественные точки на одну
+    .slice(0, 24);  // Ограничение API: макс. 24 символа
+  
+  // 🔥 Если после санитизации строка пустая — генерируем заново
   const finalLocal = safeLocal || `user${Date.now().toString(36)}`;
+  
   return `${finalLocal}@${domain}`;
 }
 
@@ -300,10 +311,18 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     emailAddress = externalEmail;
     emailKey = externalEmailKey;
   } else {
-    // ВАЖНО: сначала очищаем ящики, затем создаём новый inbox.
-    // Иначе deleteall может удалить только что выданный `key`, и getlist вернёт key_not_found.
     cleanupPostShiftInbox();
-    const postShift = await createPostShiftEmail();
+    
+    // 🔥 Берём имя почты из Excel: приоритет row['mail name'] (регистронезависимо)
+    const mailNameFromRow = 
+      row['mail name'] || 
+      row['Mail Name'] || 
+      row['MAIL NAME'] || 
+      row['mail_name'] || 
+      row['MailName'] ||
+      null;
+    
+    const postShift = await createPostShiftEmail(mailNameFromRow);  // ✅ Передаём имя из Excel
     emailAddress = postShift.email;
     emailKey = postShift.key;
   }
