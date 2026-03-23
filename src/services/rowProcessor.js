@@ -219,7 +219,7 @@ async function cleanupPostShiftInbox(inbox) {
 chromium.use(stealth());
 
 const BROWSER_CONFIG = {
-  headless: false,
+  headless: true,
   viewport: { width: 1920, height: 1080 },
   userAgent:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -229,6 +229,7 @@ const BROWSER_CONFIG = {
     "--no-sandbox",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-gpu", // Рекомендуется для headless режима
   ],
 };
 
