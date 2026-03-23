@@ -1,6 +1,6 @@
 import { chromium } from "playwright-extra";
 import stealth from "puppeteer-extra-plugin-stealth";
-import axios from "axios";
+import { FreecustomEmailClient } from "freecustom-email";
 import "dotenv/config";
 import * as cheerio from "cheerio";
 
@@ -25,6 +25,16 @@ function extractVerificationCode(htmlContent) {
 
   console.log(`🔍 Парсим текст письма: "${text.substring(0, 300)}..."`);
 
+  // 0) Жесткий матч по точной фразе из письма
+  const strictRegex =
+    /Для подтверждения регистрации учетной записи введи код подтверждения\.\s*(\d{4})/i;
+  const strictMatch = text.match(strictRegex);
+  if (strictMatch?.[1]) {
+    const code = strictMatch[1];
+    console.log(`✅ Код (по строгой фразе) найден: ${code}`);
+    return { code, success: true };
+  }
+
   // 0) Самое приоритетное: код после фразы "введи код подтверждения"
   // Пример: "Для подтверждения ... введи код подтверждения. 1946"
   const directPhrase = text.match(
@@ -38,7 +48,7 @@ function extractVerificationCode(htmlContent) {
 
   // 1) Сначала ищем около ключевых слов и допускаем разделители (пробел/дефис)
   const keywordRegex =
-    /(?:код|code|confirmation|подтвержден|подтверждения|verification)[^\dA-Za-z]{0,40}([0-9][0-9\s-]{2,20}[0-9])/i;
+    /(?:код|code|verification|one[-\s]?time\s?password|otp)[^\dA-Za-z]{0,40}([0-9][0-9\s-]{2,20}[0-9])/i;
   const keywordMatch = text.match(keywordRegex);
   if (keywordMatch?.[1]) {
     const digits = keywordMatch[1].replace(/\D+/g, "");
@@ -62,8 +72,17 @@ function extractVerificationCode(htmlContent) {
   // 3) Ищем "чистые" 4-8 последовательности цифр
   const pureDigits = text.match(/\b\d{4,8}\b/);
   if (pureDigits?.[0]) {
-    console.log(`✅ Код (по чистым цифрам) найден: ${pureDigits[0]}`);
-    return { code: pureDigits[0], success: true };
+    // Защита от ложного срабатывания на "Подтверждение регистрации №1998"
+    const around = text.slice(
+      Math.max(0, pureDigits.index - 24),
+      pureDigits.index + pureDigits[0].length
+    );
+    if (/регистрац|№/i.test(around)) {
+      // пропускаем номер регистрации
+    } else {
+      console.log(`✅ Код (по чистым цифрам) найден: ${pureDigits[0]}`);
+      return { code: pureDigits[0], success: true };
+    }
   }
 
   // 4) Наконец, пробуем алфанумерик (4-8) рядом/в тексте
@@ -83,140 +102,105 @@ function extractVerificationCode(htmlContent) {
   };
 }
 
-// 🔥 Создание временной почты через post-shift.ru
-async function createPostShiftEmail(name = null, domain = "post-shift.ru") {
-  const hash = process.env.POST_SHIFT_HASH;
-  if (!hash) throw new Error("POST_SHIFT_HASH не настроен в .env");
+const FREECUSTOM_DEFAULT_DOMAIN = "ditube.info";
 
-  const emailName =
-    name ||
-    `user${Math.random().toString(36).substring(2, 8)}`.substring(0, 10);
+let freecustomClient = null;
 
-  const response = await axios.get("https://post-shift.ru/api.php", {
-    params: {
-      action: "new",
-      hash,
-      name: emailName,
-      domain,
-    },
-    timeout: 10000,
+function getFreecustomClient() {
+  if (freecustomClient) return freecustomClient;
+  const apiKey = process.env.MY_API_KEY;
+  if (!apiKey) throw new Error("MY_API_KEY не настроен в .env");
+  freecustomClient = new FreecustomEmailClient({
+    apiKey,
+    timeout: 20_000,
+    retry: { attempts: 2, initialDelayMs: 800 },
   });
-
-  const { email, key } = response.data;
-  if (!email || !key) {
-    throw new Error(
-      `Не удалось создать почту: ${JSON.stringify(response.data)}`
-    );
-  }
-
-  console.log("📧 Создан inbox post-shift:", {
-    email,
-    keyPresent: Boolean(key),
-    keyLength: typeof key === "string" ? key.length : null,
-  });
-  return { email, key };
+  return freecustomClient;
 }
 
-// 🔥 Получение списка писем
-async function getPostShiftMessages(key) {
-  const hash = process.env.POST_SHIFT_HASH;
+function unwrapData(obj) {
+  if (!obj) return obj;
+  // некоторые методы SDK могут возвращать { success, data: ... }
+  if (typeof obj === "object" && "data" in obj && obj.data) return obj.data;
+  return obj;
+}
 
+function makeInboxAddress(local, domain) {
+  const safeLocal = String(local)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")
+    .slice(0, 24);
+  const finalLocal = safeLocal || `user${Date.now().toString(36)}`;
+  return `${finalLocal}@${domain}`;
+}
+
+async function registerInbox(email) {
+  const client = getFreecustomClient();
+  const res = await client.inboxes.register(email);
+  const data = unwrapData(res);
+  return data?.inbox || email;
+}
+
+async function createPostShiftEmail(name = null, domain = FREECUSTOM_DEFAULT_DOMAIN) {
+  const email = makeInboxAddress(
+    name || `user${Math.random().toString(36).substring(2, 8)}`,
+    domain
+  );
   try {
-    const response = await axios.get("https://post-shift.ru/api.php", {
-      params: {
-        action: "getlist",
-        hash,
-        key,
-      },
-      timeout: 10000,
-    });
-
-    // 🔥 Лог для отладки
-    console.log(`📡 getlist ответ:`, {
-      status: response.status,
-      data: response.data,
-      isArray: Array.isArray(response.data),
-    });
-
-    // API может вернуть объект с ошибкой
-    if (response.data?.error) {
-      console.warn(`⚠️ API ошибка getlist: ${response.data.error}`);
-      const apiError = response.data.error;
-      if (apiError === "key_not_found") {
-        const e = new Error("POSTSHIFT_KEY_NOT_FOUND");
-        e.code = "POSTSHIFT_KEY_NOT_FOUND";
-        throw e;
-      }
-      if (apiError === "insufficient_limits_on_the_balance") {
-        const e = new Error("POSTSHIFT_INSUFFICIENT_LIMITS");
-        e.code = "POSTSHIFT_INSUFFICIENT_LIMITS";
-        throw e;
-      }
-      return [];
-    }
-
-    return Array.isArray(response.data) ? response.data : [];
+    const registered = await registerInbox(email);
+    console.log("📧 Создан inbox freecustom:", { inbox: registered });
+    return { email: registered, key: registered };
   } catch (err) {
-    console.error(`❌ getlist failed:`, err.response?.data || err.message);
+    const msg = String(err?.message || "");
+    // В ошибке часто есть пример домена / upgrade_url
+    const suggestedDomain =
+      err?.provided_domains_example ||
+      msg.match(/something@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1] ||
+      msg.match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1];
+
+    if (suggestedDomain && suggestedDomain !== domain) {
+      const fallbackEmail = makeInboxAddress(name || `user${Date.now()}`, suggestedDomain);
+      const registered = await registerInbox(fallbackEmail);
+      console.log("📧 Создан inbox freecustom (fallback domain):", {
+        inbox: registered,
+        domain: suggestedDomain,
+      });
+      return { email: registered, key: registered };
+    }
+    throw err;
+  }
+}
+
+async function getPostShiftMessages(inbox) {
+  try {
+    const client = getFreecustomClient();
+    const res = await client.messages.list(String(inbox));
+    const data = unwrapData(res);
+    const list = Array.isArray(data) ? data : data?.messages;
+    return Array.isArray(list) ? list : [];
+  } catch (err) {
+    console.error("❌ freecustom messages.list failed:", err?.message || err);
     return [];
   }
 }
 
-// 🔥 Получение текста письма
-async function getPostShiftMessage(key, messageId) {
-  const hash = process.env.POST_SHIFT_HASH;
-
+async function getPostShiftMessage(inbox, messageId) {
   try {
-    // 🔥 Сначала пробуем с forced=1 (без cut и base64)
-    const response = await axios.get("https://post-shift.ru/api.php", {
-      params: {
-        action: "getmail",
-        hash,
-        key,
-        id: messageId,
-        forced: 1, // 🔥 КЛЮЧЕВОЙ ПАРАМЕТР: возвращает письмо без обработки
-      },
-      timeout: 10000,
-    });
-
-    console.log(`📡 getmail #${messageId} ответ:`, {
-      status: response.status,
-      hasMessage:
-        !!response.data?.message ||
-        !!response.data?.mail ||
-        !!response.data?.text ||
-        !!response.data?.body,
-      fullResponse: response.data, // 🔥 Логим весь ответ для отладки
-    });
-
-    // 🔥 Проверяем разные возможные поля в ответе
-    const message =
-      response.data?.message?.text ||
-      response.data?.message?.body ||
-      response.data?.message ||
-      response.data?.text ||
-      response.data?.body ||
-      response.data?.content ||
-      response.data?.mail ||
-      response.data?.html ||
-      "";
-
-    return message;
+    const client = getFreecustomClient();
+    const res = await client.messages.get(String(inbox), String(messageId));
+    return unwrapData(res) || null;
   } catch (err) {
-    console.error(`❌ getmail failed:`, err.response?.data || err.message);
-    return "";
+    console.error("❌ freecustom messages.get failed:", err?.message || err);
+    return null;
   }
 }
 
-// 🔥 Очистка/удаление ящика
-async function cleanupPostShiftInbox() {
+async function cleanupPostShiftInbox(inbox) {
   try {
-    await axios.get("https://post-shift.ru/api.php?action=deleteall");
-
-    console.log(`🗑️ Ящики удалены`);
+    const client = getFreecustomClient();
+    await client.inboxes.unregister(String(inbox));
     return true;
-  } catch (err) {
-    console.warn(`⚠️ Не удалось удалить ящики`);
+  } catch {
     return false;
   }
 }
@@ -564,7 +548,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       let code = null;
       const maxAttempts = 30; // 🔥 90 секунд ожидания
-      const pollInterval = 3000; // 3 секунды между попытками
+      // Free plan: 1 req/s. Держим запас, чтобы не упираться в лимиты.
+      const pollInterval = 2200;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         assertContinue(shouldContinue);
@@ -585,45 +570,57 @@ export const processRow = async (row, options = {}, emitLog = null) => {
             );
 
             // Письем может прийти несколько; иногда код не в самом первом.
+            // На Free плане нельзя делать messages.get (лимит 1 req/s), поэтому извлекаем из метаданных.
             const candidates = messages.slice(0, 3);
             for (const msg of candidates) {
-              const fullText = await getPostShiftMessage(
-                emailKey,
-                msg.id
-              );
-              console.log(
-                `📄 Текст письма #${msg.id}:`,
-                fullText.substring(0, 500)
-              );
+              // 1) Если API уже извлёк OTP — берём его напрямую
+              if (msg?.otp && msg.otp !== "__DETECTED__") {
+                code = String(msg.otp);
+                log("info", `✅ Код найден (otp): ${code}`);
+                break;
+              }
 
-              const result = extractVerificationCode(fullText);
+              const excerpt = msg?.mail_excerpt || msg?.excerpt || "";
+              const subject = msg?.subject || "";
+              // На free-плане ориентируемся прежде всего на excerpt (там чаще есть код),
+              // subject может содержать номер регистрации вместо OTP.
+              const combined = `${excerpt}\n${subject}`.trim();
+
+              console.log("📩 Содержимое письма (для парсинга кода):", {
+                id: msg?.id,
+                from: msg?.from,
+                subject,
+                excerpt,
+                otp: msg?.otp,
+                combinedPreview: combined.substring(0, 500),
+              });
+
+              // 2) Тянем полное письмо и ищем код в body (там часто нужная фраза с кодом).
+              // Перед messages.get выдерживаем паузу, чтобы не словить 1 req/s лимит.
+              await randomDelay(1200, 1200, shouldContinue);
+              const fullMsg = await getPostShiftMessage(emailKey, msg?.id);
+              const fullText = `${fullMsg?.text || ""}\n${fullMsg?.html || ""}`.trim();
+
+              if (fullText) {
+                console.log("📨 Полный текст письма (preview):", {
+                  id: msg?.id,
+                  fullPreview: fullText.substring(0, 1000),
+                });
+              }
+
+              const textForRegex = fullText || combined;
+              const result = extractVerificationCode(textForRegex);
               if (result.success) {
                 code = result.code;
                 log("info", `✅ Код найден: ${code}`);
                 break;
               }
-
-              log(
-                "warn",
-                `⚠️ Код не распознан в письме #${msg.id}. Текст: "${fullText.substring(
-                  0,
-                  200
-                )}..."`,
-                result
-              );
             }
 
             if (code) break;
           }
         } catch (e) {
           log("error", `❌ Ошибка при чтении почты: ${e.message}`);
-        if (
-          e?.code === "POSTSHIFT_KEY_NOT_FOUND" ||
-          e?.code === "POSTSHIFT_INSUFFICIENT_LIMITS"
-        ) {
-          // Inbox протух или баланс закончился — смысла продолжать опрос нет.
-          break;
-        }
         }
 
         if (attempt < maxAttempts) {
