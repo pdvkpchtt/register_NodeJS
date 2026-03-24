@@ -5,6 +5,23 @@ import { processRow } from "../services/rowProcessor.js";
 
 const router = Router();
 
+// 🔥 Генерация случайного целого числа в диапазоне [min, max]
+const randomInRange = (min, max) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
+// 🔥 Форматирование времени: 157000ms → "2 мин 37 сек"
+const formatDuration = (ms) => {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts = [];
+  if (minutes > 0) parts.push(`${minutes} мин`);
+  if (seconds > 0 || minutes === 0) parts.push(`${seconds} сек`);
+  return parts.join(" ");
+};
+
 // 🔥 GET /parse-stream/status
 router.get("/parse-stream/status", (req, res) => {
   const processing = memoryStore.getProcessing();
@@ -41,7 +58,7 @@ router.post("/parse-stream/stop", (req, res) => {
 });
 
 /**
- * Фоновая обработка: не привязана к HTTP-запросу (перезагрузка вкладки не отменяет цикл).
+ * Фоновая обработка: не привязана к HTTP-запросу.
  * Останавливается только через POST /parse-stream/stop.
  */
 async function runParseJob(app) {
@@ -50,8 +67,24 @@ async function runParseJob(app) {
   try {
     const file = memoryStore.getFile();
     const batchSize = 1;
-    const durationMinutes = parseInt(memoryStore.getSetting("duration")) || 0;
-    const cooldownMs = durationMinutes > 0 ? durationMinutes * 60 * 1000 : 0;
+
+    // 🔥 Читаем настройки duration и durationMax (в минутах)
+    const durationMin = parseInt(memoryStore.getSetting("duration")) || 0;
+    const durationMax =
+      parseInt(memoryStore.getSetting("durationMax")) || durationMin;
+
+    // 🔥 Нормализуем: min <= max
+    const minMinutes = Math.min(durationMin, durationMax);
+    const maxMinutes = Math.max(durationMin, durationMax);
+
+    // 🔥 Генерация случайной паузы в миллисекундах (с точностью до секунды)
+    const getRandomCooldownMs = () => {
+      if (maxMinutes === 0) return 0;
+      const minSeconds = minMinutes * 60;
+      const maxSeconds = maxMinutes * 60;
+      const randomSeconds = randomInRange(minSeconds, maxSeconds);
+      return randomSeconds * 1000;
+    };
 
     const workbookWrite = XLSX.read(file.buffer, {
       type: "buffer",
@@ -162,7 +195,7 @@ async function runParseJob(app) {
     });
 
     emitLog("info", `🚀 Старт: ${file.originalname}`, {
-      cooldown: cooldownMs ? `${durationMinutes} мин` : "нет",
+      cooldown: maxMinutes > 0 ? `${minMinutes}-${maxMinutes} мин` : "нет",
     });
 
     const io = getIo();
@@ -306,8 +339,13 @@ async function runParseJob(app) {
       const processed = start - startRow + 1;
       emitProgress(processed, totalRows, results.success, results.failed);
 
-      if (cooldownMs > 0 && wasProcessed && start <= endRow) {
-        emitLog("info", `😴 Пауза ${durationMinutes} мин...`);
+      // 🔥 Пауза с рандомным интервалом (минуты + секунды)
+      if (maxMinutes > 0 && wasProcessed && start <= endRow) {
+        const cooldownMs = getRandomCooldownMs();
+        const formattedPause = formatDuration(cooldownMs);
+
+        emitLog("info", `😴 Пауза ${formattedPause}...`);
+
         await new Promise((resolve) => {
           const timeout = setTimeout(resolve, cooldownMs);
           const checkCancel = setInterval(() => {
@@ -318,6 +356,7 @@ async function runParseJob(app) {
             }
           }, 1000);
         });
+
         if (!memoryStore.isProcessing()) break;
       }
     }
@@ -364,7 +403,7 @@ async function runParseJob(app) {
   }
 }
 
-// 🔥 GET /parse-stream — запуск фоновой обработки (ответ сразу, цикл не привязан к клиенту)
+// 🔥 GET /parse-stream — запуск фоновой обработки
 router.get("/parse-stream", async (req, res) => {
   try {
     if (memoryStore.isProcessing()) {
