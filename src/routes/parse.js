@@ -78,6 +78,7 @@ async function runParseJob(app) {
     const maxMinutes = Math.max(durationMin, durationMax);
 
     // 🔥 Генерация случайной паузы в миллисекундах (с точностью до секунды)
+    // Вызываем эту функцию КАЖДЫЙ РАЗ перед паузой для новой строки
     const getRandomCooldownMs = () => {
       if (maxMinutes === 0) return 0;
       const minSeconds = minMinutes * 60;
@@ -225,8 +226,6 @@ async function runParseJob(app) {
         defval: "",
       });
 
-      let wasProcessed = false;
-
       for (const row of chunkData) {
         if (!memoryStore.isProcessing()) break;
 
@@ -234,6 +233,7 @@ async function runParseJob(app) {
           row["ФАМИЛИЯ"] || row["Фамилия"] || `Row #${start + 1}`;
         const excelRowIndex = start;
 
+        // Проверка на "Завершен"
         if (completedColIndex !== -1) {
           const cellRef = XLSX.utils.encode_cell({
             r: excelRowIndex,
@@ -249,6 +249,12 @@ async function runParseJob(app) {
             });
             results.rows.push({ success: true, row, skipped: true });
             results.success++;
+
+            // 🔥 Пауза даже после пропуска (если нужно)
+            if (maxMinutes > 0) {
+              const cooldownMs = getRandomCooldownMs();
+              await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+            }
             continue;
           }
         }
@@ -329,36 +335,36 @@ async function runParseJob(app) {
         results.rows.push(result);
         if (result.success) results.success++;
         else results.failed++;
-        wasProcessed = true;
+
+        // 🔥 Обновляем прогресс после каждой строки
+        const processed = start - startRow + 1;
+        emitProgress(processed, totalRows, results.success, results.failed);
+
+        // 🔥 🔥 🔥 ПАУЗА ПОСЛЕ КАЖДОЙ СТРОКИ С НОВЫМ РАНДОМОМ 🔥 🔥 🔥
+        if (maxMinutes > 0) {
+          const cooldownMs = getRandomCooldownMs(); // <-- Новый рандом каждый раз!
+          const formattedPause = formatDuration(cooldownMs);
+
+          emitLog("info", `😴 Пауза ${formattedPause}...`);
+
+          await new Promise((resolve) => {
+            const timeout = setTimeout(resolve, cooldownMs);
+            const checkCancel = setInterval(() => {
+              if (!memoryStore.isProcessing()) {
+                clearTimeout(timeout);
+                clearInterval(checkCancel);
+                resolve();
+              }
+            }, 1000);
+          });
+
+          if (!memoryStore.isProcessing()) break parseRows;
+        }
       }
 
       chunkData.length = 0;
       if (start % 5 === 0)
         await new Promise((resolve) => setImmediate(resolve));
-
-      const processed = start - startRow + 1;
-      emitProgress(processed, totalRows, results.success, results.failed);
-
-      // 🔥 Пауза с рандомным интервалом (минуты + секунды)
-      if (maxMinutes > 0 && wasProcessed && start <= endRow) {
-        const cooldownMs = getRandomCooldownMs();
-        const formattedPause = formatDuration(cooldownMs);
-
-        emitLog("info", `😴 Пауза ${formattedPause}...`);
-
-        await new Promise((resolve) => {
-          const timeout = setTimeout(resolve, cooldownMs);
-          const checkCancel = setInterval(() => {
-            if (!memoryStore.isProcessing()) {
-              clearTimeout(timeout);
-              clearInterval(checkCancel);
-              resolve();
-            }
-          }, 1000);
-        });
-
-        if (!memoryStore.isProcessing()) break;
-      }
     }
 
     updateFileInMemory();
