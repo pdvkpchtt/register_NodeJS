@@ -36,7 +36,6 @@ function extractVerificationCode(htmlContent) {
   }
 
   // 0) Самое приоритетное: код после фразы "введи код подтверждения"
-  // Пример: "Для подтверждения ... введи код подтверждения. 1946"
   const directPhrase = text.match(
     /(?:введи\s+)?код\s+подтверждения[^\d]{0,40}([0-9]{4,8})/i
   );
@@ -46,7 +45,7 @@ function extractVerificationCode(htmlContent) {
     return { code, success: true };
   }
 
-  // 1) Сначала ищем около ключевых слов и допускаем разделители (пробел/дефис)
+  // 1) Ищем около ключевых слов с разделителями
   const keywordRegex =
     /(?:код|code|verification|one[-\s]?time\s?password|otp)[^\dA-Za-z]{0,40}([0-9][0-9\s-]{2,20}[0-9])/i;
   const keywordMatch = text.match(keywordRegex);
@@ -58,7 +57,7 @@ function extractVerificationCode(htmlContent) {
     }
   }
 
-  // 2) Дальше ищем любые "кандидаты" из цифр/букв (4-8), но сначала пробуем нормализовать цифры
+  // 2) Кандидаты из цифр с разделителями
   const digitCandidates = (text.match(/\b[0-9][0-9\s-]{2,20}\b/g) || [])
     .map((c) => c.replace(/\D+/g, ""))
     .filter((c) => c.length >= 4 && c.length <= 8);
@@ -69,10 +68,9 @@ function extractVerificationCode(htmlContent) {
     return { code: best, success: true };
   }
 
-  // 3) Ищем "чистые" 4-8 последовательности цифр
+  // 3) Чистые 4-8 последовательности цифр
   const pureDigits = text.match(/\b\d{4,8}\b/);
   if (pureDigits?.[0]) {
-    // Защита от ложного срабатывания на "Подтверждение регистрации №1998"
     const around = text.slice(
       Math.max(0, pureDigits.index - 24),
       pureDigits.index + pureDigits[0].length
@@ -85,7 +83,7 @@ function extractVerificationCode(htmlContent) {
     }
   }
 
-  // 4) Наконец, пробуем алфанумерик (4-8) рядом/в тексте
+  // 4) Алфанумерик (4-8)
   const alphanum = (text.match(/\b[A-Z0-9]{4,8}\b/gi) || [])
     .map((s) => s.toUpperCase())
     .find((s) => !s.includes("HTTP") && !s.includes("WWW"));
@@ -120,28 +118,26 @@ function getFreecustomClient() {
 
 function unwrapData(obj) {
   if (!obj) return obj;
-  // некоторые методы SDK могут возвращать { success, data: ... }
   if (typeof obj === "object" && "data" in obj && obj.data) return obj.data;
   return obj;
 }
 
 function makeInboxAddress(local, domain) {
-  // 🔥 Если local пустой — генерируем уникальный, но читаемый идентификатор
-  if (!local || String(local).trim() === '') {
-    local = `user${Date.now().toString(36)}${Math.random().toString(36).substring(2, 5)}`;
+  if (!local || String(local).trim() === "") {
+    local = `user${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .substring(2, 5)}`;
   }
-  
-  // 🔥 Санитизация: только латиница, цифры, . _ -
+
   const safeLocal = String(local)
     .toLowerCase()
-    .replace(/[^a-z0-9._-]/g, '')  // Удаляем всё лишнее
-    .replace(/^[._-]+|[._-]+$/g, '')  // Убираем спецсимволы по краям
-    .replace(/\.{2,}/g, '.')  // Заменяем множественные точки на одну
-    .slice(0, 24);  // Ограничение API: макс. 24 символа
-  
-  // 🔥 Если после санитизации строка пустая — генерируем заново
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .replace(/\.{2,}/g, ".")
+    .slice(0, 24);
+
   const finalLocal = safeLocal || `user${Date.now().toString(36)}`;
-  
+
   return `${finalLocal}@${domain}`;
 }
 
@@ -152,7 +148,10 @@ async function registerInbox(email) {
   return data?.inbox || email;
 }
 
-async function createPostShiftEmail(name = null, domain = FREECUSTOM_DEFAULT_DOMAIN) {
+async function createPostShiftEmail(
+  name = null,
+  domain = FREECUSTOM_DEFAULT_DOMAIN
+) {
   const email = makeInboxAddress(
     name || `user${Math.random().toString(36).substring(2, 8)}`,
     domain
@@ -163,14 +162,16 @@ async function createPostShiftEmail(name = null, domain = FREECUSTOM_DEFAULT_DOM
     return { email: registered, key: registered };
   } catch (err) {
     const msg = String(err?.message || "");
-    // В ошибке часто есть пример домена / upgrade_url
     const suggestedDomain =
       err?.provided_domains_example ||
       msg.match(/something@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1] ||
       msg.match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1];
 
     if (suggestedDomain && suggestedDomain !== domain) {
-      const fallbackEmail = makeInboxAddress(name || `user${Date.now()}`, suggestedDomain);
+      const fallbackEmail = makeInboxAddress(
+        name || `user${Date.now()}`,
+        suggestedDomain
+      );
       const registered = await registerInbox(fallbackEmail);
       console.log("📧 Создан inbox freecustom (fallback domain):", {
         inbox: registered,
@@ -219,7 +220,7 @@ async function cleanupPostShiftInbox(inbox) {
 chromium.use(stealth());
 
 const BROWSER_CONFIG = {
-  headless: true,
+  headless: false,
   viewport: { width: 1920, height: 1080 },
   userAgent:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -229,7 +230,6 @@ const BROWSER_CONFIG = {
     "--no-sandbox",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-gpu", // Рекомендуется для headless режима
   ],
 };
 
@@ -262,7 +262,6 @@ async function randomDelay(min, max, shouldContinue = () => true) {
   }
 }
 
-/** Прерывает ожидание Playwright при нажатии «Стоп» (memoryStore.isProcessing → false) */
 function raceWithCancel(playwrightPromise, shouldContinue) {
   let intervalId;
   const cancelPromise = new Promise((_, reject) => {
@@ -280,6 +279,55 @@ function raceWithCancel(playwrightPromise, shouldContinue) {
   return Promise.race([playwrightPromise, cancelPromise]).finally(() => {
     clearInterval(intervalId);
   });
+}
+
+// 🔥 Конвертирует дату из Excel (число или строку) в формат "ДД ММ ГГГГ"
+function parseExcelDate(value) {
+  if (!value) return null;
+
+  // Если уже строка с пробелами — возвращаем как есть
+  if (typeof value === "string" && /\d+\s+\d+\s+\d+/.test(value)) {
+    return value.trim();
+  }
+
+  // Если число (серийный номер даты Excel)
+  if (typeof value === "number" && value > 1000 && value < 100000) {
+    try {
+      // Excel epoch: 30 Dec 1899, но с багом високосного 1900 года
+      let days = Math.floor(value);
+      let msInDay = 86400000;
+
+      // Базовая дата + дни
+      let date = new Date(Date.UTC(1899, 11, 30));
+      date.setUTCDate(date.getUTCDate() + days);
+
+      // Исправление бага: Excel считает 1900 високосным, но это не так
+      // Все даты >= 60 (после 28.02.1900) нужно сдвинуть на 1 день назад
+      if (value >= 60) {
+        date.setUTCDate(date.getUTCDate() - 1);
+      }
+
+      // Форматируем: "28 7 2002"
+      const day = date.getUTCDate();
+      const month = date.getUTCMonth() + 1; // 0-based
+      const year = date.getUTCFullYear();
+
+      return `${day} ${month} ${year}`;
+    } catch (e) {
+      console.warn(`⚠️ Не удалось распарсить дату ${value}: ${e.message}`);
+      return null;
+    }
+  }
+
+  // Если строка в другом формате — пробуем распарсить
+  if (typeof value === "string") {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      return `${date.getDate()} ${date.getMonth() + 1} ${date.getFullYear()}`;
+    }
+  }
+
+  return String(value).trim();
 }
 
 export const processRow = async (row, options = {}, emitLog = null) => {
@@ -303,7 +351,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     humanDelayMax = 3000,
     externalEmail = null,
     externalEmailKey = null,
-    /** Вызывается из parse-stream: пока true — продолжаем строку; «Стоп» снимает флаг в memoryStore */
     shouldContinue = () => true,
   } = options;
 
@@ -312,26 +359,29 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     emailAddress = externalEmail;
     emailKey = externalEmailKey;
   } else {
-    cleanupPostShiftInbox();
-    
-    // 🔥 Берём имя почты из Excel: приоритет row['mail name'] (регистронезависимо)
-    const mailNameFromRow = 
-      row['mail name'] || 
-      row['Mail Name'] || 
-      row['MAIL NAME'] || 
-      row['mail_name'] || 
-      row['MailName'] ||
+    await cleanupPostShiftInbox(emailKey);
+
+    const mailNameFromRow =
+      row["mail name"] ||
+      row["Mail Name"] ||
+      row["MAIL NAME"] ||
+      row["mail_name"] ||
+      row["MailName"] ||
       null;
-    
-    const postShift = await createPostShiftEmail(mailNameFromRow);  // ✅ Передаём имя из Excel
+
+    const postShift = await createPostShiftEmail(mailNameFromRow);
     emailAddress = postShift.email;
     emailKey = postShift.key;
   }
 
   const userName = row["Фамилия"] || row["ФАМИЛИЯ"] || "User";
   let browser;
+  let formSubmittedSuccessfully = false;
 
   const log = (level, message, meta = {}) => {
+    // 🔥 Фильтр: не показывать debug-логи в консоли (раскомментируйте если нужно)
+    // if (level === "debug") return;
+
     console.log(`[${level}] ${message}`, meta);
     if (emitLog) {
       emitLog(level, message, {
@@ -397,15 +447,17 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     }
 
     // === Дата рождения ===
+    const rawBirthDate = row["Дата рождения"];
+    const birthDateStr = parseExcelDate(rawBirthDate + 1);
+
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Дата рождения"]) {
       log("info", `⌨️ Ввод даты рождения...`);
-      const birthDate = row["Дата рождения"].split(" ");
+      const birthDate = birthDateStr.split(" ");
       const day = birthDate[0],
         month = birthDate[1],
         year = birthDate[2];
 
-      // День
       await page.locator(`xpath=${birthDay}`).click({ delay: 200 });
       await randomDelay(200, 500, shouldContinue);
       const dayNum = parseInt(day, 10);
@@ -418,7 +470,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         await page.keyboard.press("Enter", { delay: 100 });
         log("info", `✅ День выбран: ${dayNum}`);
       }
-      // Месяц
       if (month) {
         await randomDelay(200, 400, shouldContinue);
         await page.locator(`xpath=${birthMonth}`).click({ delay: 200 });
@@ -434,7 +485,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           log("info", `✅ Месяц выбран: ${monthNum}`);
         }
       }
-      // Год
       if (year) {
         await randomDelay(200, 400, shouldContinue);
         await page.locator(`xpath=${birthYear}`).click({ delay: 200 });
@@ -478,13 +528,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     log("info", `🔍 Проверка капчи...`);
     const captchaContainer = page.locator("#yandexSmartCaptchaContainer");
     const captchaCount = await captchaContainer.count().catch(() => 0);
-    const captchaVisible = await captchaContainer.isVisible().catch(() => false);
+    const captchaVisible = await captchaContainer
+      .isVisible()
+      .catch(() => false);
 
-    log("debug", `🧩 SmartCaptcha: present=${captchaCount > 0}, visible=${captchaVisible}`);
-
-    if (captchaCount > 0) {
-      if (captchaVisible) log("info", `🧩 Yandex SmartCaptcha обнаружена`);
-      // Делаем несколько попыток кликнуть, т.к. у SmartCaptcha часто бывает оверлей/iframe.
+    if (captchaCount > 0 && captchaVisible) {
+      log("info", `🧩 Yandex SmartCaptcha обнаружена`);
       let token = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         assertContinue(shouldContinue);
@@ -494,42 +543,86 @@ export const processRow = async (row, options = {}, emitLog = null) => {
             delay: 100,
             force: true,
           });
-          log("info", `🖱️ Капча: клик попытка ${attempt}/3`);
         } catch (e) {
-          log("warn", `⚠️ Не удалось кликнуть капчу (попытка ${attempt}/3): ${e.message}`);
+          log("warn", `⚠️ Клик по капче не удался: ${e.message}`);
         }
-
         token = await page
           .waitForFunction(
             () =>
-              document.querySelector('input[name="smart-token"]')?.value?.length >
-              20,
+              document.querySelector('input[name="smart-token"]')?.value
+                ?.length > 20,
             { timeout: 5000 }
           )
           .catch(() => null);
-
         if (token) break;
         await randomDelay(1000, 1500, shouldContinue);
       }
-
-      if (token) log("info", `✅ Капча пройдена`);
-      else {
+      if (!token) {
         log("warn", `⚠️ Капча не пройдена автоматически`);
-        await randomDelay(5000, 10000, shouldContinue);
+        await randomDelay(5000, 8000, shouldContinue);
       }
     }
 
-    // === Отправка ===
+    // === Отправка формы ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🖱️ Клик по "Продолжить"...`);
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
 
+    await page
+      .waitForLoadState("networkidle", { timeout: 10000 })
+      .catch(() => {});
+    const postSubmitUrl = page.url();
+    log("debug", `🔗 URL после отправки: ${postSubmitUrl}`);
+
+    // 🔥 ПРОВЕРКА: ушли ли на страницу подтверждения?
+    if (postSubmitUrl.includes("/Registration/Confirmation")) {
+      log("success", `✅ Форма отправлена успешно — страница подтверждения`);
+      formSubmittedSuccessfully = true; // ← 🔥 ВОТ ЭТОГО НЕ ХВАТАЛО!
+    } else {
+      // Проверка на ошибки валидации
+      const errorSelectors = [
+        ".error",
+        ".validation-error",
+        '[class*="error"]',
+        ".field-error",
+      ];
+      let hasErrors = false;
+      for (const selector of errorSelectors) {
+        const count = await page
+          .locator(selector)
+          .count()
+          .catch(() => 0);
+        if (count > 0) {
+          hasErrors = true;
+          const text = await page
+            .locator(selector)
+            .first()
+            .textContent()
+            .catch(() => "")
+            .trim();
+          log("warn", `⚠️ Ошибка валидации (${selector}): ${text}`);
+          break;
+        }
+      }
+      if (hasErrors) {
+        log("error", `❌ Форма не отправлена из-за ошибок`);
+        formSubmittedSuccessfully = false;
+      } else {
+        // Неочевидный результат — пробуем дальше
+        log("warn", `⚠️ Неочевидный результат отправки, пробуем опрос почты`);
+        formSubmittedSuccessfully = true;
+      }
+    }
+
     const encodedEmail = encodeURIComponent(emailAddress);
 
-    // Запускаем ожидание подтверждения и поллинг почты параллельно,
-    // чтобы успеть получить код до протухания inbox.
+    // 🔥 Прогрев перед опросом почты
+    log("info", `⏳ Ждём 10 сек перед опросом почты...`);
+    await randomDelay(10000, 10000, shouldContinue);
+
+    // === Параллельное ожидание страницы и опрос почты ===
     const waitConfirmPromise = (async () => {
-      log("info", `⏳ Ожидание перехода на страницу подтверждения...`);
+      if (!formSubmittedSuccessfully) return;
       try {
         await raceWithCancel(
           page.waitForURL(
@@ -543,129 +636,104 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         log("success", `✅ Страница подтверждения загружена`);
       } catch (err) {
         if (err?.code === "PROCESS_CANCELLED") throw err;
-        log(
-          "warn",
-          `⚠️ Не удалось дождаться по email, пробуем общий паттерн...`
-        );
-        try {
-          await raceWithCancel(
-            page.waitForURL(
-              (url) => url.href.includes("/Registration/Confirmation"),
-              { timeout: 15000, waitUntil: "domcontentloaded" }
-            ),
-            shouldContinue
-          );
-          log("success", `✅ Страница подтверждения загружена (общий паттерн)`);
-        } catch (err2) {
-          if (err2?.code === "PROCESS_CANCELLED") throw err2;
-          log("error", `❌ Не удалось дождаться: ${err2.message}`);
-        }
+        // log("warn", `⚠️ Не удалось дождаться страницу подтверждения`);
       }
     })();
 
     const pollCodePromise = (async () => {
-      log("info", `📬 Проверка почты ${emailAddress}...`);
+      if (!formSubmittedSuccessfully) {
+        log("warn", `⏭️ Пропускаем опрос почты`);
+        return null;
+      }
 
+      log("info", `📬 Проверка почты ${emailAddress}...`);
       let code = null;
-      const maxAttempts = 30; // 🔥 90 секунд ожидания
-      // Free plan: 1 req/s. Держим запас, чтобы не упираться в лимиты.
+      const maxAttempts = 40; // 🔥 Увеличено до 40 попыток (~90 сек)
       const pollInterval = 2200;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         assertContinue(shouldContinue);
         try {
           const messages = await getPostShiftMessages(emailKey);
-
           log(
             "debug",
-            `🔍 Попытка ${attempt}/${maxAttempts}: найдено писем: ${messages.length}`
+            `🔍 Попытка ${attempt}/${maxAttempts}: писем: ${messages.length}`
           );
 
           if (messages.length > 0) {
             log(
               "info",
-              `✅ Письма получены: ${messages
-                .map((m) => m.subject)
-                .join(", ")}`
+              `✅ Письма: ${messages.map((m) => m.subject).join(", ")}`
             );
 
-            // Письем может прийти несколько; иногда код не в самом первом.
-            // На Free плане нельзя делать messages.get (лимит 1 req/s), поэтому извлекаем из метаданных.
-            const candidates = messages.slice(0, 3);
-            for (const msg of candidates) {
-              // 1) Если API уже извлёк OTP — берём его напрямую
+            for (const msg of messages.slice(0, 3)) {
+              // 1) Готовый OTP от API
               if (msg?.otp && msg.otp !== "__DETECTED__") {
                 code = String(msg.otp);
-                log("info", `✅ Код найден (otp): ${code}`);
+                log("info", `✅ Код из API: ${code}`);
                 break;
               }
 
-              const excerpt = msg?.mail_excerpt || msg?.excerpt || "";
-              const subject = msg?.subject || "";
-              // На free-плане ориентируемся прежде всего на excerpt (там чаще есть код),
-              // subject может содержать номер регистрации вместо OTP.
-              const combined = `${excerpt}\n${subject}`.trim();
+              // 2) Парсинг из excerpt/subject
+              const combined = `${msg?.mail_excerpt || msg?.excerpt || ""}\n${
+                msg?.subject || ""
+              }`.trim();
 
-              console.log("📩 Содержимое письма (для парсинга кода):", {
-                id: msg?.id,
-                from: msg?.from,
-                subject,
-                excerpt,
-                otp: msg?.otp,
-                combinedPreview: combined.substring(0, 500),
-              });
-
-              // 2) Тянем полное письмо и ищем код в body (там часто нужная фраза с кодом).
-              // Перед messages.get выдерживаем паузу, чтобы не словить 1 req/s лимит.
-              await randomDelay(1200, 1200, shouldContinue);
+              // 3) Парсинг из полного тела письма
+              await randomDelay(800, 800, shouldContinue);
               const fullMsg = await getPostShiftMessage(emailKey, msg?.id);
-              const fullText = `${fullMsg?.text || ""}\n${fullMsg?.html || ""}`.trim();
+              const fullText = `${fullMsg?.text || ""}\n${
+                fullMsg?.html || ""
+              }`.trim();
+              const textForParse = fullText || combined;
 
-              if (fullText) {
-                console.log("📨 Полный текст письма (preview):", {
-                  id: msg?.id,
-                  fullPreview: fullText.substring(0, 1000),
-                });
-              }
-
-              const textForRegex = fullText || combined;
-              const result = extractVerificationCode(textForRegex);
+              const result = extractVerificationCode(textForParse);
               if (result.success) {
                 code = result.code;
                 log("info", `✅ Код найден: ${code}`);
                 break;
               }
             }
-
             if (code) break;
           }
         } catch (e) {
-          log("error", `❌ Ошибка при чтении почты: ${e.message}`);
+          log("error", `❌ Ошибка чтения почты: ${e.message}`);
         }
-
         if (attempt < maxAttempts) {
           await randomDelay(pollInterval, pollInterval, shouldContinue);
         }
       }
 
+      // 🔥 Финальная попытка с увеличенной задержкой
       if (!code) {
-        log(
-          "warn",
-          `⚠️ Код не получен после ${maxAttempts} попыток (${
-            (maxAttempts * pollInterval) / 1000
-          } сек)`
-        );
+        log("info", `🔄 Финальная проверка почты...`);
+        await randomDelay(12000, 12000, shouldContinue);
+        try {
+          const final = await getPostShiftMessages(emailKey);
+          for (const msg of final.slice(0, 2)) {
+            if (msg?.otp && msg.otp !== "__DETECTED__") {
+              code = String(msg.otp);
+              break;
+            }
+            const fullMsg = await getPostShiftMessage(emailKey, msg?.id);
+            const fullText = `${fullMsg?.text || ""}\n${
+              fullMsg?.html || ""
+            }`.trim();
+            const result = extractVerificationCode(fullText);
+            if (result.success) {
+              code = result.code;
+              break;
+            }
+          }
+        } catch {}
       }
 
+      if (!code) log("warn", `⚠️ Код не найден после ${maxAttempts} попыток`);
       return code;
     })();
 
-    // Ждём оба ожидания, но код забираем из pollCodePromise
     const code = await pollCodePromise;
     await waitConfirmPromise;
-
-    const currentUrl = page.url();
-    log("debug", `🔗 Текущий URL: ${currentUrl}`);
 
     // === Ввод кода ===
     if (code) {
@@ -680,8 +748,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         .catch(() => log("warn", `⚠️ Поле для кода не найдено`));
 
       await typeHumanLike(page, secondInput, code);
-
       await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
+
       log("info", `🖱️ Клик по "Подтвердить"...`);
       await page.locator(`xpath=${secondSubmitButton}`).click({ delay: 200 });
 
@@ -696,43 +764,55 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           shouldContinue
         );
       } catch (e) {
-        if (e?.code === "PROCESS_CANCELLED") throw e;
-        log("warn", `⚠️ Таймаут редиректа`);
+        if (e?.code !== "PROCESS_CANCELLED")
+          log("warn", `⚠️ Таймаут редиректа`);
       }
 
-      await randomDelay(5000, 7000, shouldContinue);
-
-      // 🔥 ОЧИСТКА ПОЧТЫ ПОСЛЕ УСПЕШНОГО ВВОДА
-      log("info", `🧹 Очистка временной почты ${emailAddress}...`);
-      await cleanupPostShiftInbox(emailKey, emailAddress, "clear");
+      await randomDelay(4000, 6000, shouldContinue);
+      log("info", `🧹 Очистка почты ${emailAddress}...`);
+      await cleanupPostShiftInbox(emailKey);
+    } else {
+      log("warn", `⚠️ Код не найден, пропускаем ввод`);
     }
 
     // === Финальный результат ===
     const finalUrl = page.url();
-    const success =
-      finalUrl.includes("cabinet.moyastrana.ru") ||
-      (finalUrl.includes("/Registration/Confirmation") && code !== null);
+    const trulySucceeded = !!(
+      code && finalUrl.includes("cabinet.moyastrana.ru")
+    );
+    const completed = trulySucceeded ? "да" : "нет";
+
     log(
-      success ? "success" : "warn",
+      trulySucceeded ? "success" : "warn",
       `🎯 Результат: ${
-        success ? "✅ Успех" : "⚠️ Неизвестно"
-      } | URL: ${finalUrl}`
+        trulySucceeded ? "✅ Успех" : "❌ Неудача"
+      } | Завершено: ${completed}`
     );
 
     return {
-      success,
+      success: trulySucceeded,
+      completed, // 🔥 "да" или "нет"
       row,
       email: emailAddress,
       emailId: emailKey,
       confirmationCode: code,
       timestamp: new Date().toISOString(),
       url: finalUrl,
+      debug: {
+        codeFound: !!code,
+        formSubmitted: formSubmittedSuccessfully,
+        finalUrl,
+      },
     };
   } catch (err) {
-    if (err?.code === "PROCESS_CANCELLED" || err?.message === PROCESS_CANCELLED) {
-      log("warn", "🛑 Остановлено пользователем (кнопка «Стоп»)");
+    if (
+      err?.code === "PROCESS_CANCELLED" ||
+      err?.message === PROCESS_CANCELLED
+    ) {
+      log("warn", "🛑 Остановлено пользователем");
       return {
         success: false,
+        completed: "нет",
         cancelled: true,
         row,
         email: emailAddress,
@@ -743,6 +823,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     log("error", `❌ Ошибка: ${err.message}`, { stack: err.stack });
     return {
       success: false,
+      completed: "нет",
       row,
       email: emailAddress,
       emailId: emailKey,
@@ -750,10 +831,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       timestamp: new Date().toISOString(),
     };
   } finally {
-    // 🔥 Гарантированная очистка в фоне
-    if (emailKey && emailAddress) {
-      cleanupPostShiftInbox(emailKey, emailAddress, "clear").catch(() => {});
-    }
+    if (emailKey) cleanupPostShiftInbox(emailKey).catch(() => {});
     if (browser) {
       await browser.close();
       log("info", `🔚 Браузер закрыт`);

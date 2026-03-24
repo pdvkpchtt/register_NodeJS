@@ -102,34 +102,34 @@ async function runParseJob(app) {
       defval: "",
     })[0];
     const headers = headerRow.map((h, i) =>
-      h ? String(h).trim() : `column_${i}`
+      h ? String(h).trim() : `column_${i}`,
     );
 
     const completedColIndex = headers.findIndex(
-      (h) => h?.trim().toLowerCase() === "завершен"
+      (h) => h?.trim().toLowerCase() === "завершен",
     );
     const emailColIndex = headers.findIndex(
       (h) =>
         h?.trim().toLowerCase() === "почта" ||
-        h?.trim().toLowerCase() === "email"
+        h?.trim().toLowerCase() === "email",
     );
     const emailIdColIndex = headers.findIndex(
       (h) =>
         h?.trim().toLowerCase() === "индекс почты" ||
         h?.trim().toLowerCase() === "emailid" ||
-        h?.trim().toLowerCase() === "id почты"
+        h?.trim().toLowerCase() === "id почты",
     );
 
     console.log(`📊 Файл: ${file.originalname}, строк: ${endRow}`);
     console.log(
       `✅ "Завершен": ${
         completedColIndex !== -1 ? `#${completedColIndex + 1}` : "не найдена"
-      }`
+      }`,
     );
     console.log(
       `✅ "Почта": ${
         emailColIndex !== -1 ? `#${emailColIndex + 1}` : "не найдена"
-      }`
+      }`,
     );
 
     const emitLog = (level, message, meta = {}) => {
@@ -288,7 +288,7 @@ async function runParseJob(app) {
             externalEmail: shouldGenerateEmail ? null : emailAddress,
             shouldContinue: () => memoryStore.isProcessing(),
           },
-          emitLog
+          emitLog,
         );
 
         if (result.cancelled) {
