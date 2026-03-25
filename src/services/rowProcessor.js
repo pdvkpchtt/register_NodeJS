@@ -219,23 +219,38 @@ async function cleanupPostShiftInbox(inbox) {
 
 chromium.use(stealth());
 
-const BROWSER_CONFIG = {
-  headless: true, // 🔥 Меняем false → true (или "new" для нового режима)
-  viewport: { width: 1920, height: 1080 },
-  userAgent:
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  args: [
-    "--disable-blink-features=AutomationControlled",
-    "--disable-dev-shm-usage",
-    "--no-sandbox",
-    "--disable-web-security",
-    "--disable-features=IsolateOrigins,site-per-process",
-    // 🔥 Дополнительные флаги для стабильного headless-режима:
-    "--disable-gpu", // Отключаем GPU (не нужен в headless)
-    "--disable-software-rasterizer",
-    "--disable-setuid-sandbox",
-  ],
-};
+const BROWSER_CONFIG =
+  process.env.NODE_ENV === "production"
+    ? {
+        headless: true, // 🔥 Меняем false → true (или "new" для нового режима)
+        viewport: { width: 1920, height: 1080 },
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--disable-dev-shm-usage",
+          "--no-sandbox",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
+          // 🔥 Дополнительные флаги для стабильного headless-режима:
+          "--disable-gpu", // Отключаем GPU (не нужен в headless)
+          "--disable-software-rasterizer",
+          "--disable-setuid-sandbox",
+        ],
+      }
+    : {
+        headless: false, // 🔥 Меняем false → true (или "new" для нового режима)
+        viewport: { width: 1920, height: 1080 },
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--disable-dev-shm-usage",
+          "--no-sandbox",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
+      };
 
 const INIT_SCRIPTS = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
