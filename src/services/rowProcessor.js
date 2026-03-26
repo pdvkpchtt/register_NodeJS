@@ -101,6 +101,12 @@ function extractVerificationCode(htmlContent) {
 }
 
 const FREECUSTOM_DEFAULT_DOMAIN = "ditube.info";
+// Ваши кастомные домены
+const customDomains = ["googlu.ru", "maaiil.ru", "yaanndex.ru"];
+// Функция для выбора случайного элемента из массива
+function getRandomElement(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 let freecustomClient = null;
 
@@ -136,9 +142,11 @@ function makeInboxAddress(local, domain) {
     .replace(/\.{2,}/g, ".")
     .slice(0, 24);
 
+  const randomDomain = getRandomElement(customDomains);
+
   const finalLocal = safeLocal || `user${Date.now().toString(36)}`;
 
-  return `${finalLocal}@${domain}`;
+  return `${finalLocal}@${randomDomain}`;
 }
 
 async function registerInbox(email) {
@@ -150,7 +158,7 @@ async function registerInbox(email) {
 
 async function createPostShiftEmail(
   name = null,
-  domain = FREECUSTOM_DEFAULT_DOMAIN
+  domain = getRandomElement(customDomains)
 ) {
   const email = makeInboxAddress(
     name || `user${Math.random().toString(36).substring(2, 8)}`,
