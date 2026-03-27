@@ -142,11 +142,12 @@ function makeInboxAddress(local, domain) {
     .replace(/\.{2,}/g, ".")
     .slice(0, 24);
 
-  const randomDomain = getRandomElement(customDomains);
+  // 🔥 ИСПОЛЬЗУЕМ переданный domain, если есть
+  const finalDomain = domain;
 
   const finalLocal = safeLocal || `user${Date.now().toString(36)}`;
 
-  return `${finalLocal}@${randomDomain}`;
+  return `${finalLocal}@${finalDomain}`; // ← ✅ Теперь домен корректный
 }
 
 async function registerInbox(email) {
