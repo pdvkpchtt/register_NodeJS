@@ -371,7 +371,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     emailField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[7]/div[3]/input",
     passwordField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[8]/input",
     passwordRepeatField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[9]/input",
-    checkBoxOne = '//*[@id="IsUserAgreementAccepted"]',
+    checkBoxOne = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[10]/div[3]/div[1]/input",
     submitButton = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[12]/button",
     secondInput = "/html/body/div[5]/div[1]/div/div/div/form/div[1]/input",
     secondSubmitButton = "/html/body/div[5]/div[1]/div/div/div/form/div[3]/button",
