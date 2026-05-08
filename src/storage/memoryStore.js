@@ -2,7 +2,8 @@ const MAX_LOGS = 50; // 🔥 Храним только последние 50 л�
 
 const store = {
   file: null,
-  settingsForm: { duration: "1", durationMax: "2" },
+  // 🔥 duration/durationMax теперь в СЕКУНДАХ: 5–30 сек по умолчанию
+  settingsForm: { duration: "5", durationMax: "30" },
   processing: {
     isActive: false,
     startedAt: null,

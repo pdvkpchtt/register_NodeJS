@@ -622,12 +622,13 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           .catch(() => 0);
         if (count > 0) {
           hasErrors = true;
+          debugger;
           const text = await page
             .locator(selector)
             .first()
             .textContent()
             .catch(() => "")
-            .trim();
+            .then((t) => t?.trim() || "");
           log("warn", `⚠️ Ошибка валидации (${selector}): ${text}`);
           break;
         }

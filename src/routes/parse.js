@@ -68,21 +68,20 @@ async function runParseJob(app) {
     const file = memoryStore.getFile();
     const batchSize = 1;
 
-    // 🔥 Читаем настройки duration и durationMax (в минутах)
+    // 🔥 Читаем настройки duration и durationMax (в СЕКУНДАХ)
     const durationMin = parseInt(memoryStore.getSetting("duration")) || 0;
     const durationMax =
       parseInt(memoryStore.getSetting("durationMax")) || durationMin;
 
     // 🔥 Нормализуем: min <= max
-    const minMinutes = Math.min(durationMin, durationMax);
-    const maxMinutes = Math.max(durationMin, durationMax);
+    const minSeconds = Math.min(durationMin, durationMax);
+    const maxSeconds = Math.max(durationMin, durationMax);
 
-    // 🔥 Генерация случайной паузы в миллисекундах (с точностью до секунды)
+    // 🔥 Генерация случайной паузы в миллисекундах
     // Вызываем эту функцию КАЖДЫЙ РАЗ перед паузой для новой строки
     const getRandomCooldownMs = () => {
-      if (maxMinutes === 0) return 0;
-      const minSeconds = minMinutes * 60;
-      const maxSeconds = maxMinutes * 60;
+      if (maxSeconds === 0) return 0;
+      // Значения уже в секундах — просто конвертируем в мс
       const randomSeconds = randomInRange(minSeconds, maxSeconds);
       return randomSeconds * 1000;
     };
@@ -196,7 +195,8 @@ async function runParseJob(app) {
     });
 
     emitLog("info", `🚀 Старт: ${file.originalname}`, {
-      cooldown: maxMinutes > 0 ? `${minMinutes}-${maxMinutes} мин` : "нет",
+      // 🔥 Теперь указываем секунды
+      cooldown: maxSeconds > 0 ? `${minSeconds}-${maxSeconds} сек` : "нет",
     });
 
     const io = getIo();
@@ -336,7 +336,7 @@ async function runParseJob(app) {
         emitProgress(processed, totalRows, results.success, results.failed);
 
         // 🔥 🔥 🔥 ПАУЗА ПОСЛЕ КАЖДОЙ СТРОКИ С НОВЫМ РАНДОМОМ 🔥 🔥 🔥
-        if (maxMinutes > 0) {
+        if (maxSeconds > 0) {
           const cooldownMs = getRandomCooldownMs(); // <-- Новый рандом каждый раз!
           const formattedPause = formatDuration(cooldownMs);
 
