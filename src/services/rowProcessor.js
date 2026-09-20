@@ -1,8 +1,11 @@
 import { chromium } from "playwright-extra";
 import stealth from "puppeteer-extra-plugin-stealth";
 import { FreecustomEmailClient } from "freecustom-email";
+import { Solver } from "2captcha-ts";
 import "dotenv/config";
 import * as cheerio from "cheerio";
+import fs from "fs";
+import sharp from "sharp";
 
 // 🔥 Функция для извлечения кода из HTML
 function extractVerificationCode(htmlContent) {
@@ -232,7 +235,7 @@ const BROWSER_CONFIG =
   process.env.NODE_ENV === "production"
     ? {
         headless: true, // 🔥 Меняем false → true (или "new" для нового режима)
-        viewport: { width: 1920, height: 1080 },
+        viewport: { width: 1920, height: 1920 },
         userAgent:
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         args: [
@@ -249,7 +252,7 @@ const BROWSER_CONFIG =
       }
     : {
         headless: false, // 🔥 Меняем false → true (или "new" для нового режима)
-        viewport: { width: 1920, height: 1080 },
+        viewport: { width: 1920, height: 1920 },
         userAgent:
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         args: [
@@ -360,21 +363,23 @@ function parseExcelDate(value) {
 
 export const processRow = async (row, options = {}, emitLog = null) => {
   const {
-    loginUrl = "https://identity.rsv.ru/Registration?returnUrl=%2Fconnect%2Fauthorize%2Fcallback%3Fclient_id%3Drsv-moyastrana%26redirect_uri%3Dhttps%253A%252F%252Fcabinet.moyastrana.ru%252Frsv-auth%252F%26response_type%3Dcode%26scope%3Dopenid%2520profile%26code_challenge%3DIrWiNqN2a6LErDuSSjio_IXruOylczA9YIQ6VkA4-fI%26code_challenge_method%3DS256",
-    familia = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[1]/input",
-    imya = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[2]/input",
-    otchestvo = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[3]/input",
-    city = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[5]/input[1]",
-    birthDay = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[6]/div[2]/div[1]/select",
-    birthMonth = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[6]/div[2]/div[2]/select",
-    birthYear = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[6]/div[2]/div[3]/select",
-    emailField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[7]/div[3]/input",
-    passwordField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[8]/input",
-    passwordRepeatField = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[9]/input",
-    checkBoxOne = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[10]/div[3]/div[1]/input",
-    submitButton = "/html/body/div[5]/div[1]/div/div/div[2]/form/div[12]/button",
+    loginUrl = "https://lift-bf.ru/contest/ocean?z=register",
+    familia = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[1]/div/input",
+    imya = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[2]/div/input",
+    otchestvo = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/div[1]/div/label[1]/div/input",
+    city = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/div[3]/span[2]",
+    cityChoose = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/div[3]/div/ul/li[1]/div",
+    birthDay = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[3]/div/input",
+    phoneField = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[4]/div/input",
+    emailField = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[5]/div/input",
+    passwordField = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[7]/div/input",
+    passwordRepeatField = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[8]/div/input",
+    checkBoxOne = "/html/body/div[1]/div[1]/div/div/div/form/label[1]/span[2]/div/span",
+    checkBoxTwo = "/html/body/div[1]/div[1]/div/div/div/form/label[2]/span[2]/div/span",
+    submitButton = "/html/body/div[1]/div[1]/div/div/div/form/div[2]/button",
     secondInput = "/html/body/div[5]/div[1]/div/div/div/form/div[1]/input",
     secondSubmitButton = "/html/body/div[5]/div[1]/div/div/div/form/div[3]/button",
+    captha = "/html/body/div[2]/div[2]/div/div/div/div/div/div[1]/div/img",
     humanDelayMin = 1000,
     humanDelayMax = 3000,
     externalEmail = null,
@@ -387,7 +392,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     emailAddress = externalEmail;
     emailKey = externalEmailKey;
   } else {
-    await cleanupPostShiftInbox(emailKey);
+    // await cleanupPostShiftInbox(emailKey);
 
     const mailNameFromRow =
       row["mail name"] ||
@@ -397,9 +402,9 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       row["MailName"] ||
       null;
 
-    const postShift = await createPostShiftEmail(mailNameFromRow);
-    emailAddress = postShift.email;
-    emailKey = postShift.key;
+    // const postShift = await createPostShiftEmail(mailNameFromRow);
+    // emailAddress = postShift.email;
+    // emailKey = postShift.key;
   }
 
   const userName = row["Фамилия"] || row["ФАМИЛИЯ"] || "User";
@@ -431,6 +436,10 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     const context = await browser.newContext({
       viewport: BROWSER_CONFIG.viewport,
       userAgent: BROWSER_CONFIG.userAgent,
+      recordVideo: {
+        dir: "videos",
+        size: BROWSER_CONFIG.viewport, // Должно совпадать с viewport для идеальной картинки
+      },
     });
     const page = await context.newPage();
     await page.addInitScript(INIT_SCRIPTS);
@@ -466,73 +475,29 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Город"]) {
       log("info", `⌨️ Ввод города...`);
-      await typeHumanLike(page, city, row["Город"]);
-      await randomDelay(500, 1000, shouldContinue);
-      await page.keyboard.press("ArrowDown", { delay: 100 });
-      await randomDelay(100, 300, shouldContinue);
-      await page.keyboard.press("Enter", { delay: 100 });
+      await clickAndTypeHumanLike(page, city, row["Город"]);
+      await randomDelay(2000, 2500, shouldContinue);
+      page.locator(`xpath=${cityChoose}`).click({ delay: 200 });
+
       log("info", `✅ Город выбран: ${row["Город"]}`);
     }
 
     // === Дата рождения ===
-    const rawBirthDate = row["Дата рождения"];
-    const birthDateStr = parseExcelDate(rawBirthDate + 1);
-
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-    if (row["Дата рождения"]) {
-      log("info", `⌨️ Ввод даты рождения...`);
-      const birthDate = birthDateStr.split(" ");
-      const day = birthDate[0],
-        month = birthDate[1],
-        year = birthDate[2];
+    const bday = randomBirthDate();
+    log("info", `⌨️ Ввод даты рождения..., ${bday}`);
+    page.locator(`xpath=${birthDay}`).fill(bday);
 
-      await page.locator(`xpath=${birthDay}`).click({ delay: 200 });
-      await randomDelay(200, 500, shouldContinue);
-      const dayNum = parseInt(day, 10);
-      if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
-        for (let i = 0; i < dayNum; i++)
-          await page.keyboard.press("ArrowDown", {
-            delay: 50 + Math.random() * 50,
-          });
-        await randomDelay(100, 300, shouldContinue);
-        await page.keyboard.press("Enter", { delay: 100 });
-        log("info", `✅ День выбран: ${dayNum}`);
-      }
-      if (month) {
-        await randomDelay(200, 400, shouldContinue);
-        await page.locator(`xpath=${birthMonth}`).click({ delay: 200 });
-        await randomDelay(200, 500, shouldContinue);
-        const monthNum = parseInt(month, 10);
-        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
-          for (let i = 0; i < monthNum; i++)
-            await page.keyboard.press("ArrowDown", {
-              delay: 50 + Math.random() * 50,
-            });
-          await randomDelay(100, 300, shouldContinue);
-          await page.keyboard.press("Enter", { delay: 100 });
-          log("info", `✅ Месяц выбран: ${monthNum}`);
-        }
-      }
-      if (year) {
-        await randomDelay(200, 400, shouldContinue);
-        await page.locator(`xpath=${birthYear}`).click({ delay: 200 });
-        await randomDelay(200, 500, shouldContinue);
-        const yearNum = parseInt(year, 10);
-        if (!isNaN(yearNum)) {
-          const yearIndex = 2024 - yearNum;
-          for (let i = 0; i < yearIndex; i++)
-            await page.keyboard.press("ArrowDown", {
-              delay: 30 + Math.random() * 30,
-            });
-          await randomDelay(100, 300, shouldContinue);
-          await page.keyboard.press("Enter", { delay: 100 });
-          log("info", `✅ Год выбран: ${yearNum}`);
-        }
-      }
+    // === Телефон ===
+    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
+    if (row["Телефон"]) {
+      log("info", `⌨️ Ввод телефона...`);
+      await typeHumanLike(page, phoneField, row["Телефон"]);
     }
 
     // === Почта ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
+    const emailAddress = row["Почта"];
     if (emailAddress) {
       log("info", `⌨️ Ввод почты: ${emailAddress}`);
       await typeHumanLike(page, emailField, emailAddress);
@@ -550,265 +515,329 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🖱️ Клик по чекбоксу...`);
     await page.locator(`xpath=${checkBoxOne}`).click({ delay: 200 });
-
-    // === Капча ===
-    await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-    log("info", `🔍 Проверка капчи...`);
-    const captchaContainer = page.locator("#yandexSmartCaptchaContainer");
-    const captchaCount = await captchaContainer.count().catch(() => 0);
-    const captchaVisible = await captchaContainer
-      .isVisible()
-      .catch(() => false);
-
-    if (captchaCount > 0 && captchaVisible) {
-      log("info", `🧩 Yandex SmartCaptcha обнаружена`);
-      let token = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        assertContinue(shouldContinue);
-        try {
-          await captchaContainer.click({
-            position: { x: 15, y: 15 },
-            delay: 100,
-            force: true,
-          });
-        } catch (e) {
-          log("warn", `⚠️ Клик по капче не удался: ${e.message}`);
-        }
-        token = await page
-          .waitForFunction(
-            () =>
-              document.querySelector('input[name="smart-token"]')?.value
-                ?.length > 20,
-            { timeout: 5000 }
-          )
-          .catch(() => null);
-        if (token) break;
-        await randomDelay(1000, 1500, shouldContinue);
-      }
-      if (!token) {
-        log("warn", `⚠️ Капча не пройдена автоматически`);
-        await randomDelay(5000, 8000, shouldContinue);
-      }
-    }
+    await page.locator(`xpath=${checkBoxTwo}`).click({ delay: 200 });
 
     // === Отправка формы ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     log("info", `🖱️ Клик по "Продолжить"...`);
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
+    await randomDelay(1000, 3000, shouldContinue);
 
-    await page
-      .waitForLoadState("networkidle", { timeout: 10000 })
-      .catch(() => {});
-    const postSubmitUrl = page.url();
-    log("debug", `🔗 URL после отправки: ${postSubmitUrl}`);
+    log("debug", `🔗 Форма отправлена`);
 
-    // 🔥 ПРОВЕРКА: ушли ли на страницу подтверждения?
-    if (postSubmitUrl.includes("/Registration/Confirmation")) {
-      log("success", `✅ Форма отправлена успешно — страница подтверждения`);
-      formSubmittedSuccessfully = true; // ← 🔥 ВОТ ЭТОГО НЕ ХВАТАЛО!
-    } else {
-      // Проверка на ошибки валидации
-      const errorSelectors = [
-        ".error",
-        ".validation-error",
-        '[class*="error"]',
-        ".field-error",
-      ];
-      let hasErrors = false;
-      for (const selector of errorSelectors) {
-        const count = await page
-          .locator(selector)
-          .count()
-          .catch(() => 0);
-        if (count > 0) {
-          hasErrors = true;
-          debugger;
-          const text = await page
-            .locator(selector)
-            .first()
-            .textContent()
-            .catch(() => "")
-            .then((t) => t?.trim() || "");
-          log("warn", `⚠️ Ошибка валидации (${selector}): ${text}`);
-          break;
+    // === РЕШЕНИЕ YANDEX SMARTCAPTCHA (МЕТОД СКРИНШОТА) ===
+    // === РЕШЕНИЕ YANDEX SMARTCAPTCHA (СКРИН ВСЕЙ СТРАНИЦЫ) ===
+    // === РЕШЕНИЕ YANDEX SMARTCAPTCHA ===
+    // === РЕШЕНИЕ YANDEX SMARTCAPTCHA (СКРИН С КВАДРАТАМИ) ===
+    log("info", `🔍 Решение капчи...`);
+    try {
+      const viewport = page.viewportSize();
+      if (!viewport) throw new Error("Не удалось получить размеры viewport");
+
+      const captchaWidth = 500;
+      const captchaHeight = 500;
+      const clipX = Math.floor((viewport.width - captchaWidth) / 2);
+      const clipY = Math.floor((viewport.height - captchaHeight) / 2);
+
+      const clipRegion = {
+        x: clipX,
+        y: clipY,
+        width: captchaWidth,
+        height: captchaHeight,
+      };
+
+      log(
+        "debug",
+        `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
+      );
+
+      // Скриншоты для отладки
+      const screenshotFull = await page.screenshot({
+        type: "png",
+        fullPage: false,
+      });
+      fs.writeFileSync("screen_full.png", screenshotFull);
+
+      const screenshot = await page.screenshot({
+        type: "png",
+        clip: clipRegion,
+      });
+      fs.writeFileSync("captcha_full.png", screenshot);
+
+      // 2captcha
+      // === 🔥 ПОВТОРНАЯ ОТПРАВКА В 2CAPTCHA ПРИ НЕВЕРНОМ ОТВЕТЕ ===
+      const solver = new Solver(process.env.API_KEY);
+      let result = null;
+      const maxRetries = 3; // Максимум 3 попытки
+      let attempt = 0;
+
+      while (attempt < maxRetries) {
+        attempt++;
+        log(
+          "info",
+          `🔄 Отправка в 2captcha (попытка ${attempt}/${maxRetries})...`
+        );
+
+        result = await solver.coordinates({
+          body: screenshot.toString("base64"),
+          lang: "ru",
+        });
+
+        log("info", `✅ Ответ от 2captcha: ${JSON.stringify(result.data)}`);
+
+        // Проверяем, что точек больше 1 (для Яндекса обычно нужно 2-5 точек)
+        if (result.data && result.data.length > 1) {
+          log(
+            "info",
+            `✅ Получено корректное количество точек: ${result.data.length}`
+          );
+          break; // Всё хорошо, выходим из цикла
+        } else {
+          log(
+            "warn",
+            `⚠️ Неверное количество точек (${
+              result.data ? result.data.length : 0
+            }). Повторная попытка...`
+          );
+          if (attempt < maxRetries) {
+            await new Promise((resolve) => setTimeout(resolve, 1500)); // Пауза перед повтором
+          }
         }
       }
-      if (hasErrors) {
-        log("error", `❌ Форма не отправлена из-за ошибок`);
-        formSubmittedSuccessfully = false;
-      } else {
-        // Неочевидный результат — пробуем дальше
-        log("warn", `⚠️ Неочевидный результат отправки, пробуем опрос почты`);
-        formSubmittedSuccessfully = true;
-      }
-    }
 
-    const encodedEmail = encodeURIComponent(emailAddress);
-
-    // 🔥 Прогрев перед опросом почты
-    log("info", `⏳ Ждём 10 сек перед опросом почты...`);
-    await randomDelay(10000, 10000, shouldContinue);
-
-    // === Параллельное ожидание страницы и опрос почты ===
-    const waitConfirmPromise = (async () => {
-      if (!formSubmittedSuccessfully) return;
-      try {
-        await raceWithCancel(
-          page.waitForURL(
-            (url) =>
-              url.href.includes("/Registration/Confirmation") &&
-              url.href.includes(`PhoneOrEmail=${encodedEmail}`),
-            { timeout: 30000, waitUntil: "load" }
-          ),
-          shouldContinue
+      // Если после всех попыток точек всё ещё <= 1, выбрасываем ошибку
+      if (!result || !result.data || result.data.length <= 1) {
+        throw new Error(
+          `Не удалось получить корректные координаты после ${maxRetries} попыток. Последний ответ: ${JSON.stringify(
+            result?.data
+          )}`
         );
-        log("success", `✅ Страница подтверждения загружена`);
-      } catch (err) {
-        if (err?.code === "PROCESS_CANCELLED") throw err;
-        // log("warn", `⚠️ Не удалось дождаться страницу подтверждения`);
-      }
-    })();
-
-    const pollCodePromise = (async () => {
-      if (!formSubmittedSuccessfully) {
-        log("warn", `⏭️ Пропускаем опрос почты`);
-        return null;
       }
 
-      log("info", `📬 Проверка почты ${emailAddress}...`);
-      let code = null;
-      const maxAttempts = 40; // 🔥 Увеличено до 40 попыток (~90 сек)
-      const pollInterval = 2200;
+      log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        assertContinue(shouldContinue);
-        try {
-          const messages = await getPostShiftMessages(emailKey);
-          log(
-            "debug",
-            `🔍 Попытка ${attempt}/${maxAttempts}: писем: ${messages.length}`
-          );
+      // Рисуем квадраты на скринах для проверки
+      try {
+        const overlays = result.data.map((coord) => {
+          const x = parseInt(coord.x);
+          const y = parseInt(coord.y);
+          return {
+            input: {
+              create: {
+                width: 40,
+                height: 40,
+                channels: 4,
+                background: { r: 255, g: 0, b: 0, alpha: 0.6 },
+              },
+            },
+            top: y - 20,
+            left: x - 20,
+          };
+        });
+        await sharp(screenshot)
+          .composite(overlays)
+          .toFile("captcha_center_with_squares.png");
+      } catch (drawErr) {
+        log("warn", `⚠️ Ошибка рисования квадратиков: ${drawErr.message}`);
+      }
 
-          if (messages.length > 0) {
-            log(
-              "info",
-              `✅ Письма: ${messages.map((m) => m.subject).join(", ")}`
+      // === КЛИКИ С ВИЗУАЛИЗАЦИЕЙ ===
+      log("info", `🖱️ Начинаем клики с визуализацией...`);
+
+      for (let i = 0; i < result.data.length; i++) {
+        const coord = result.data[i];
+
+        // Чистая математика: начало области + координата от 2captcha
+        const x = clipX + parseInt(coord.x);
+        const y = clipY + parseInt(coord.y);
+
+        log(
+          "info",
+          `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
+        );
+
+        // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
+        await page.evaluate(
+          ({ clickX, clickY, clickNumber }) => {
+            const circle = document.createElement("div");
+            circle.style.position = "fixed";
+            circle.style.left = clickX - 25 + "px";
+            circle.style.top = clickY - 25 + "px";
+            circle.style.width = "50px";
+            circle.style.height = "50px";
+            circle.style.borderRadius = "50%";
+            circle.style.border = "4px solid #ff0000";
+            circle.style.background = "rgba(255, 0, 0, 0.5)";
+            circle.style.zIndex = "99999999";
+            circle.style.pointerEvents = "none";
+            circle.style.display = "flex";
+            circle.style.alignItems = "center";
+            circle.style.justifyContent = "center";
+
+            const numberSpan = document.createElement("span");
+            numberSpan.textContent = clickNumber;
+            numberSpan.style.color = "#fff";
+            numberSpan.style.fontWeight = "bold";
+            numberSpan.style.fontSize = "20px";
+            circle.appendChild(numberSpan);
+
+            // Анимация пульсации
+            circle.animate(
+              [
+                { transform: "scale(1)" },
+                { transform: "scale(1.4)" },
+                { transform: "scale(1)" },
+              ],
+              { duration: 400, iterations: 2 }
             );
 
-            for (const msg of messages.slice(0, 3)) {
-              // 1) Готовый OTP от API
-              if (msg?.otp && msg.otp !== "__DETECTED__") {
-                code = String(msg.otp);
-                log("info", `✅ Код из API: ${code}`);
-                break;
-              }
+            document.body.appendChild(circle);
 
-              // 2) Парсинг из excerpt/subject
-              const combined = `${msg?.mail_excerpt || msg?.excerpt || ""}\n${
-                msg?.subject || ""
-              }`.trim();
-
-              // 3) Парсинг из полного тела письма
-              await randomDelay(800, 800, shouldContinue);
-              const fullMsg = await getPostShiftMessage(emailKey, msg?.id);
-              const fullText = `${fullMsg?.text || ""}\n${
-                fullMsg?.html || ""
-              }`.trim();
-              const textForParse = fullText || combined;
-
-              const result = extractVerificationCode(textForParse);
-              if (result.success) {
-                code = result.code;
-                log("info", `✅ Код найден: ${code}`);
-                break;
-              }
-            }
-            if (code) break;
-          }
-        } catch (e) {
-          log("error", `❌ Ошибка чтения почты: ${e.message}`);
-        }
-        if (attempt < maxAttempts) {
-          await randomDelay(pollInterval, pollInterval, shouldContinue);
-        }
-      }
-
-      // 🔥 Финальная попытка с увеличенной задержкой
-      if (!code) {
-        log("info", `🔄 Финальная проверка почты...`);
-        await randomDelay(12000, 12000, shouldContinue);
-        try {
-          const final = await getPostShiftMessages(emailKey);
-          for (const msg of final.slice(0, 2)) {
-            if (msg?.otp && msg.otp !== "__DETECTED__") {
-              code = String(msg.otp);
-              break;
-            }
-            const fullMsg = await getPostShiftMessage(emailKey, msg?.id);
-            const fullText = `${fullMsg?.text || ""}\n${
-              fullMsg?.html || ""
-            }`.trim();
-            const result = extractVerificationCode(fullText);
-            if (result.success) {
-              code = result.code;
-              break;
-            }
-          }
-        } catch {}
-      }
-
-      if (!code) log("warn", `⚠️ Код не найден после ${maxAttempts} попыток`);
-      return code;
-    })();
-
-    const code = await pollCodePromise;
-    await waitConfirmPromise;
-
-    // === Ввод кода ===
-    if (code) {
-      await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-      log("info", `⌨️ Ввод кода: ${code}`);
-
-      await page
-        .waitForSelector(`xpath=${secondInput}`, {
-          state: "visible",
-          timeout: 10000,
-        })
-        .catch(() => log("warn", `⚠️ Поле для кода не найдено`));
-
-      await typeHumanLike(page, secondInput, code);
-      await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-
-      log("info", `🖱️ Клик по "Подтвердить"...`);
-      await page.locator(`xpath=${secondSubmitButton}`).click({ delay: 200 });
-
-      try {
-        await raceWithCancel(
-          page.waitForURL(
-            (url) =>
-              url.href.includes("cabinet.moyastrana.ru") ||
-              url.href.includes("/Account/Login"),
-            { timeout: 30000 }
-          ),
-          shouldContinue
+            // Плавное исчезновение
+            setTimeout(() => {
+              circle.style.transition = "opacity 0.5s";
+              circle.style.opacity = "0";
+              setTimeout(() => circle.remove(), 500);
+            }, 1500);
+          },
+          { clickX: x, clickY: y, clickNumber: i + 1 }
         );
-      } catch (e) {
-        if (e?.code !== "PROCESS_CANCELLED")
-          log("warn", `⚠️ Таймаут редиректа`);
+
+        // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Сам клик
+        await page.mouse.click(x, y);
+
+        // Human delay между кликами
+        await randomDelay(3000, 5000, shouldContinue);
       }
 
-      await randomDelay(4000, 6000, shouldContinue);
-      log("info", `🧹 Очистка почты ${emailAddress}...`);
-      await cleanupPostShiftInbox(emailKey);
-    } else {
-      log("warn", `⚠️ Код не найден, пропускаем ввод`);
+      log("info", `✅ Все точки нажаты`);
+      await randomDelay(1000, 1500, shouldContinue);
+
+      // Клик по кнопке "Отправить"
+      const btnX = clipX + captchaWidth / 2 + 30;
+      const btnY = clipY + captchaHeight - 144;
+
+      // Визуализация зеленой кнопки SEND
+      // Визуализация зеленой кнопки SEND
+      await page.evaluate(
+        ({ clickX, clickY }) => {
+          const btnCircle = document.createElement("div");
+          btnCircle.style.position = "fixed";
+          btnCircle.style.left = clickX - 30 + "px";
+          btnCircle.style.top = clickY - 30 + "px";
+          btnCircle.style.width = "60px";
+          btnCircle.style.height = "60px";
+          btnCircle.style.borderRadius = "50%";
+          btnCircle.style.border = "4px solid #00ff00";
+          btnCircle.style.background = "rgba(0, 255, 0, 0.5)";
+          btnCircle.style.zIndex = "99999999";
+          btnCircle.style.pointerEvents = "none";
+          btnCircle.style.display = "flex";
+          btnCircle.style.alignItems = "center";
+          btnCircle.style.justifyContent = "center";
+
+          const textSpan = document.createElement("span");
+          textSpan.textContent = "SEND";
+          textSpan.style.color = "#000";
+          textSpan.style.fontWeight = "900";
+          textSpan.style.fontSize = "14px";
+          btnCircle.appendChild(textSpan);
+
+          document.body.appendChild(btnCircle);
+          setTimeout(() => {
+            btnCircle.style.transition = "opacity 0.5s";
+            btnCircle.style.opacity = "0";
+            setTimeout(() => btnCircle.remove(), 500);
+          }, 1500);
+        },
+        { clickX: btnX, clickY: btnY }
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Сам клик
+      await page.mouse.click(btnX, btnY);
+      log("info", `✅ Клик по кнопке "Отправить" выполнен`);
+      await randomDelay(10000, 20000, shouldContinue);
+
+      // 🔥 КРИТИЧЕСКИ ВАЖНО: Даем время видео-рекордеру захватить кадры ПОСЛЕ клика,
+      // прежде чем мы начнем закрывать браузер
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // === ПРАВИЛЬНОЕ СОХРАНЕНИЕ ВИДЕО ===
+      log("info", `💾 Подготовка к сохранению видео...`);
+
+      // 1. Получаем объект видео ПОКА контекст еще открыт
+      const video = page.video();
+
+      if (video) {
+        try {
+          // 2. Создаем папку, если нет
+          if (!fs.existsSync("videos")) {
+            fs.mkdirSync("videos", { recursive: true });
+          }
+
+          const finalVideoName = `videos/captcha_solve_${Date.now()}.webm`;
+
+          // 3. ЗАКРЫВАЕМ контекст. Это финализирует запись видео-файла!
+          log("info", `🔚 Закрытие контекста для финализации видео...`);
+          await context.close();
+
+          // 4. ТЕПЕРЬ сохраняем видео из временной папки в нашу
+          await video.saveAs(finalVideoName);
+          log("info", `🎥 ВИДЕО УСПЕШНО СОХРАНЕНО: ${finalVideoName}`);
+        } catch (saveErr) {
+          log("error", `❌ Ошибка при сохранении видео: ${saveErr.message}`);
+          // На случай ошибки все равно закрываем контекст
+          await context.close().catch(() => {});
+        }
+      } else {
+        log(
+          "warn",
+          `⚠️ Видео не было записано. Проверь настройки browser.newContext`
+        );
+        await context.close().catch(() => {});
+      }
+
+      log("info", `✅ Капча решена`);
+      await randomDelay(1000, 2000, shouldContinue);
+    } catch (err) {
+      log("warn", `⚠️ Ошибка капчи: ${err.message}`);
+
+      // Сохраняем видео даже при ошибке, чтобы посмотреть, где сломалось
+      const video = page.video();
+      if (video) {
+        try {
+          if (!fs.existsSync("videos"))
+            fs.mkdirSync("videos", { recursive: true });
+          const finalVideoName = `videos/captcha_ERROR_${Date.now()}.webm`;
+
+          await context.close().catch(() => {}); // Сначала закрываем
+          await video.saveAs(finalVideoName); // Потом сохраняем
+
+          log("info", `🎥 Видео с ошибкой сохранено: ${finalVideoName}`);
+        } catch (e) {
+          log("error", `Не удалось сохранить видео с ошибкой: ${e.message}`);
+        }
+      } else {
+        await context.close().catch(() => {});
+      }
     }
+    // сюда код
+
+    log("debug", `😁👍 Капча решена`);
+    await randomDelay(1000, 3000, shouldContinue);
 
     // === Финальный результат ===
+    // === Финальный результат ===
     const finalUrl = page.url();
-    const trulySucceeded = !!(
-      code && finalUrl.includes("cabinet.moyastrana.ru")
-    );
+    const isCorrectUrl = finalUrl === "https://lift-bf.ru/contest/ocean";
+    log("debug", `🤷‍♂️ cleanUrl - ${finalUrl}`);
+
+    const trulySucceeded = !!isCorrectUrl;
     const completed = trulySucceeded ? "да" : "нет";
 
     log(
@@ -822,13 +851,9 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       success: trulySucceeded,
       completed, // 🔥 "да" или "нет"
       row,
-      email: emailAddress,
-      emailId: emailKey,
-      confirmationCode: code,
       timestamp: new Date().toISOString(),
       url: finalUrl,
       debug: {
-        codeFound: !!code,
         formSubmitted: formSubmittedSuccessfully,
         finalUrl,
       },
@@ -844,8 +869,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         completed: "нет",
         cancelled: true,
         row,
-        email: emailAddress,
-        emailId: emailKey,
         timestamp: new Date().toISOString(),
       };
     }
@@ -854,8 +877,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       success: false,
       completed: "нет",
       row,
-      email: emailAddress,
-      emailId: emailKey,
       error: err.message,
       timestamp: new Date().toISOString(),
     };
@@ -874,5 +895,25 @@ const typeHumanLike = async (page, xpath, text) => {
   for (const char of text)
     await locator.pressSequentially(char, { delay: Math.random() * 50 + 25 });
 };
+
+const clickAndTypeHumanLike = async (page, xpath, text) => {
+  const locator = page.locator(`xpath=${xpath}`);
+  await locator.click({ delay: 200 });
+  for (const char of text)
+    await locator.pressSequentially(char, { delay: Math.random() * 50 + 25 });
+};
+
+function randomBirthDate(fromYear = 1996, toYear = 2005) {
+  const start = Date.UTC(fromYear, 0, 1);
+  const end = Date.UTC(toYear, 11, 31, 23, 59, 59, 999);
+  const ts = start + Math.random() * (end - start);
+  const d = new Date(ts);
+
+  return [
+    d.getUTCFullYear(),
+    String(d.getUTCMonth() + 1).padStart(2, "0"),
+    String(d.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
 
 export default { processRow };
