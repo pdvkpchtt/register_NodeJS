@@ -436,10 +436,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     const context = await browser.newContext({
       viewport: BROWSER_CONFIG.viewport,
       userAgent: BROWSER_CONFIG.userAgent,
-      recordVideo: {
-        dir: "videos",
-        size: BROWSER_CONFIG.viewport, // Должно совпадать с viewport для идеальной картинки
-      },
     });
     const page = await context.newPage();
     await page.addInitScript(INIT_SCRIPTS);
@@ -551,18 +547,10 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
       );
 
-      // Скриншоты для отладки
-      const screenshotFull = await page.screenshot({
-        type: "png",
-        fullPage: false,
-      });
-      fs.writeFileSync("screen_full.png", screenshotFull);
-
       const screenshot = await page.screenshot({
         type: "png",
         clip: clipRegion,
       });
-      fs.writeFileSync("captcha_full.png", screenshot);
 
       // 2captcha
       // === 🔥 ПОВТОРНАЯ ОТПРАВКА В 2CAPTCHA ПРИ НЕВЕРНОМ ОТВЕТЕ ===
@@ -616,31 +604,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
 
-      // Рисуем квадраты на скринах для проверки
-      try {
-        const overlays = result.data.map((coord) => {
-          const x = parseInt(coord.x);
-          const y = parseInt(coord.y);
-          return {
-            input: {
-              create: {
-                width: 40,
-                height: 40,
-                channels: 4,
-                background: { r: 255, g: 0, b: 0, alpha: 0.6 },
-              },
-            },
-            top: y - 20,
-            left: x - 20,
-          };
-        });
-        await sharp(screenshot)
-          .composite(overlays)
-          .toFile("captcha_center_with_squares.png");
-      } catch (drawErr) {
-        log("warn", `⚠️ Ошибка рисования квадратиков: ${drawErr.message}`);
-      }
-
       // === КЛИКИ С ВИЗУАЛИЗАЦИЕЙ ===
       log("info", `🖱️ Начинаем клики с визуализацией...`);
 
@@ -656,61 +619,11 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
         );
 
-        // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
-        await page.evaluate(
-          ({ clickX, clickY, clickNumber }) => {
-            const circle = document.createElement("div");
-            circle.style.position = "fixed";
-            circle.style.left = clickX - 25 + "px";
-            circle.style.top = clickY - 25 + "px";
-            circle.style.width = "50px";
-            circle.style.height = "50px";
-            circle.style.borderRadius = "50%";
-            circle.style.border = "4px solid #ff0000";
-            circle.style.background = "rgba(255, 0, 0, 0.5)";
-            circle.style.zIndex = "99999999";
-            circle.style.pointerEvents = "none";
-            circle.style.display = "flex";
-            circle.style.alignItems = "center";
-            circle.style.justifyContent = "center";
-
-            const numberSpan = document.createElement("span");
-            numberSpan.textContent = clickNumber;
-            numberSpan.style.color = "#fff";
-            numberSpan.style.fontWeight = "bold";
-            numberSpan.style.fontSize = "20px";
-            circle.appendChild(numberSpan);
-
-            // Анимация пульсации
-            circle.animate(
-              [
-                { transform: "scale(1)" },
-                { transform: "scale(1.4)" },
-                { transform: "scale(1)" },
-              ],
-              { duration: 400, iterations: 2 }
-            );
-
-            document.body.appendChild(circle);
-
-            // Плавное исчезновение
-            setTimeout(() => {
-              circle.style.transition = "opacity 0.5s";
-              circle.style.opacity = "0";
-              setTimeout(() => circle.remove(), 500);
-            }, 1500);
-          },
-          { clickX: x, clickY: y, clickNumber: i + 1 }
-        );
-
         // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
-        await new Promise((resolve) => setTimeout(resolve, 200));
-
-        // Сам клик
         await page.mouse.click(x, y);
 
         // Human delay между кликами
-        await randomDelay(3000, 5000, shouldContinue);
+        await randomDelay(1000, 1500, shouldContinue);
       }
 
       log("info", `✅ Все точки нажаты`);
@@ -720,42 +633,6 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       const btnX = clipX + captchaWidth / 2 + 30;
       const btnY = clipY + captchaHeight - 144;
 
-      // Визуализация зеленой кнопки SEND
-      // Визуализация зеленой кнопки SEND
-      await page.evaluate(
-        ({ clickX, clickY }) => {
-          const btnCircle = document.createElement("div");
-          btnCircle.style.position = "fixed";
-          btnCircle.style.left = clickX - 30 + "px";
-          btnCircle.style.top = clickY - 30 + "px";
-          btnCircle.style.width = "60px";
-          btnCircle.style.height = "60px";
-          btnCircle.style.borderRadius = "50%";
-          btnCircle.style.border = "4px solid #00ff00";
-          btnCircle.style.background = "rgba(0, 255, 0, 0.5)";
-          btnCircle.style.zIndex = "99999999";
-          btnCircle.style.pointerEvents = "none";
-          btnCircle.style.display = "flex";
-          btnCircle.style.alignItems = "center";
-          btnCircle.style.justifyContent = "center";
-
-          const textSpan = document.createElement("span");
-          textSpan.textContent = "SEND";
-          textSpan.style.color = "#000";
-          textSpan.style.fontWeight = "900";
-          textSpan.style.fontSize = "14px";
-          btnCircle.appendChild(textSpan);
-
-          document.body.appendChild(btnCircle);
-          setTimeout(() => {
-            btnCircle.style.transition = "opacity 0.5s";
-            btnCircle.style.opacity = "0";
-            setTimeout(() => btnCircle.remove(), 500);
-          }, 1500);
-        },
-        { clickX: btnX, clickY: btnY }
-      );
-
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Сам клик
@@ -763,68 +640,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       log("info", `✅ Клик по кнопке "Отправить" выполнен`);
       await randomDelay(10000, 20000, shouldContinue);
 
-      // 🔥 КРИТИЧЕСКИ ВАЖНО: Даем время видео-рекордеру захватить кадры ПОСЛЕ клика,
-      // прежде чем мы начнем закрывать браузер
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
       // === ПРАВИЛЬНОЕ СОХРАНЕНИЕ ВИДЕО ===
-      log("info", `💾 Подготовка к сохранению видео...`);
-
-      // 1. Получаем объект видео ПОКА контекст еще открыт
-      const video = page.video();
-
-      if (video) {
-        try {
-          // 2. Создаем папку, если нет
-          if (!fs.existsSync("videos")) {
-            fs.mkdirSync("videos", { recursive: true });
-          }
-
-          const finalVideoName = `videos/captcha_solve_${Date.now()}.webm`;
-
-          // 3. ЗАКРЫВАЕМ контекст. Это финализирует запись видео-файла!
-          log("info", `🔚 Закрытие контекста для финализации видео...`);
-          await context.close();
-
-          // 4. ТЕПЕРЬ сохраняем видео из временной папки в нашу
-          await video.saveAs(finalVideoName);
-          log("info", `🎥 ВИДЕО УСПЕШНО СОХРАНЕНО: ${finalVideoName}`);
-        } catch (saveErr) {
-          log("error", `❌ Ошибка при сохранении видео: ${saveErr.message}`);
-          // На случай ошибки все равно закрываем контекст
-          await context.close().catch(() => {});
-        }
-      } else {
-        log(
-          "warn",
-          `⚠️ Видео не было записано. Проверь настройки browser.newContext`
-        );
-        await context.close().catch(() => {});
-      }
 
       log("info", `✅ Капча решена`);
       await randomDelay(1000, 2000, shouldContinue);
     } catch (err) {
       log("warn", `⚠️ Ошибка капчи: ${err.message}`);
-
-      // Сохраняем видео даже при ошибке, чтобы посмотреть, где сломалось
-      const video = page.video();
-      if (video) {
-        try {
-          if (!fs.existsSync("videos"))
-            fs.mkdirSync("videos", { recursive: true });
-          const finalVideoName = `videos/captcha_ERROR_${Date.now()}.webm`;
-
-          await context.close().catch(() => {}); // Сначала закрываем
-          await video.saveAs(finalVideoName); // Потом сохраняем
-
-          log("info", `🎥 Видео с ошибкой сохранено: ${finalVideoName}`);
-        } catch (e) {
-          log("error", `Не удалось сохранить видео с ошибкой: ${e.message}`);
-        }
-      } else {
-        await context.close().catch(() => {});
-      }
     }
     // сюда код
 
