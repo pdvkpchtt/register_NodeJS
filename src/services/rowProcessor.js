@@ -363,7 +363,7 @@ function parseExcelDate(value) {
 
 export const processRow = async (row, options = {}, emitLog = null) => {
   const {
-    loginUrl = "https://lift-bf.ru/contest/ocean?z=register",
+    loginUrl = "https://lift-bf.ru/contest/stipendia-vuz-2026?z=register",
     familia = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[1]/div/input",
     imya = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[2]/div/input",
     otchestvo = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/div[1]/div/label[1]/div/input",
@@ -377,7 +377,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     checkBoxOne = "/html/body/div[1]/div[1]/div/div/div/form/label[1]/span[2]/div/span",
     checkBoxTwo = "/html/body/div[1]/div[1]/div/div/div/form/label[2]/span[2]/div/span",
     submitButton = "/html/body/div[1]/div[1]/div/div/div/form/div[2]/button",
-    secondInput = "/html/body/div[5]/div[1]/div/div/div/form/div[1]/input",
+    studentSelect = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[6]",
     secondSubmitButton = "/html/body/div[5]/div[1]/div/div/div/form/div[3]/button",
     captha = "/html/body/div[2]/div[2]/div/div/div/div/div/div[1]/div/img",
     humanDelayMin = 1000,
@@ -433,10 +433,21 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       log("info", `📧 Создана временная почта: ${emailAddress}`);
 
     browser = await chromium.launch(BROWSER_CONFIG);
-    const context = await browser.newContext({
-      viewport: BROWSER_CONFIG.viewport,
-      userAgent: BROWSER_CONFIG.userAgent,
-    });
+    const context = await browser.newContext(
+      process.env.NODE_ENV === "production"
+        ? {
+            viewport: BROWSER_CONFIG.viewport,
+            userAgent: BROWSER_CONFIG.userAgent,
+          }
+        : {
+            viewport: BROWSER_CONFIG.viewport,
+            userAgent: BROWSER_CONFIG.userAgent,
+            recordVideo: {
+              dir: "videos",
+              size: BROWSER_CONFIG.viewport, // Должно совпадать с viewport для идеальной картинки
+            },
+          }
+    );
     const page = await context.newPage();
     await page.addInitScript(INIT_SCRIPTS);
 
@@ -490,6 +501,14 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       log("info", `⌨️ Ввод телефона...`);
       await typeHumanLike(page, phoneField, row["Телефон"]);
     }
+
+    // === Студент ===
+    log("info", `⌨️ Ввод поля "Студент"...`);
+    const locator = page.locator(`xpath=${studentSelect}`);
+    await locator.click({ delay: 200 });
+    await page.keyboard.press("ArrowDown", { delay: 100 });
+    await randomDelay(100, 300, shouldContinue);
+    await page.keyboard.press("Enter", { delay: 100 });
 
     // === Почта ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
@@ -604,6 +623,33 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
 
+      // Рисуем квадраты на скринах для проверки
+      if (process.env.NODE_ENV !== "production") {
+        try {
+          const overlays = result.data.map((coord) => {
+            const x = parseInt(coord.x);
+            const y = parseInt(coord.y);
+            return {
+              input: {
+                create: {
+                  width: 40,
+                  height: 40,
+                  channels: 4,
+                  background: { r: 255, g: 0, b: 0, alpha: 0.6 },
+                },
+              },
+              top: y - 20,
+              left: x - 20,
+            };
+          });
+          await sharp(screenshot)
+            .composite(overlays)
+            .toFile("captcha_center_with_squares.png");
+        } catch (drawErr) {
+          log("warn", `⚠️ Ошибка рисования квадратиков: ${drawErr.message}`);
+        }
+      }
+
       // === КЛИКИ С ВИЗУАЛИЗАЦИЕЙ ===
       log("info", `🖱️ Начинаем клики с визуализацией...`);
 
@@ -619,6 +665,57 @@ export const processRow = async (row, options = {}, emitLog = null) => {
           `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
         );
 
+        // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
+        if (process.env.NODE_ENV !== "production") {
+          await page.evaluate(
+            ({ clickX, clickY, clickNumber }) => {
+              const circle = document.createElement("div");
+              circle.style.position = "fixed";
+              circle.style.left = clickX - 25 + "px";
+              circle.style.top = clickY - 25 + "px";
+              circle.style.width = "50px";
+              circle.style.height = "50px";
+              circle.style.borderRadius = "50%";
+              circle.style.border = "4px solid #ff0000";
+              circle.style.background = "rgba(255, 0, 0, 0.5)";
+              circle.style.zIndex = "99999999";
+              circle.style.pointerEvents = "none";
+              circle.style.display = "flex";
+              circle.style.alignItems = "center";
+              circle.style.justifyContent = "center";
+
+              const numberSpan = document.createElement("span");
+              numberSpan.textContent = clickNumber;
+              numberSpan.style.color = "#fff";
+              numberSpan.style.fontWeight = "bold";
+              numberSpan.style.fontSize = "20px";
+              circle.appendChild(numberSpan);
+
+              // Анимация пульсации
+              circle.animate(
+                [
+                  { transform: "scale(1)" },
+                  { transform: "scale(1.4)" },
+                  { transform: "scale(1)" },
+                ],
+                { duration: 400, iterations: 2 }
+              );
+
+              document.body.appendChild(circle);
+
+              // Плавное исчезновение
+              setTimeout(() => {
+                circle.style.transition = "opacity 0.5s";
+                circle.style.opacity = "0";
+                setTimeout(() => circle.remove(), 500);
+              }, 1500);
+            },
+            { clickX: x, clickY: y, clickNumber: i + 1 }
+          );
+          // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+
         // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
         await page.mouse.click(x, y);
 
@@ -631,14 +728,91 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
       // Клик по кнопке "Отправить"
       const btnX = clipX + captchaWidth / 2 + 30;
-      const btnY = clipY + captchaHeight - 144;
+      const btnY = clipY + captchaHeight - 150;
+
+      if (process.env.NODE_ENV !== "production") {
+        // Визуализация зеленой кнопки SEND
+        // Визуализация зеленой кнопки SEND
+        await page.evaluate(
+          ({ clickX, clickY }) => {
+            const btnCircle = document.createElement("div");
+            btnCircle.style.position = "fixed";
+            btnCircle.style.left = clickX - 30 + "px";
+            btnCircle.style.top = clickY - 30 + "px";
+            btnCircle.style.width = "60px";
+            btnCircle.style.height = "60px";
+            btnCircle.style.borderRadius = "50%";
+            btnCircle.style.border = "4px solid #00ff00";
+            btnCircle.style.background = "rgba(0, 255, 0, 0.5)";
+            btnCircle.style.zIndex = "99999999";
+            btnCircle.style.pointerEvents = "none";
+            btnCircle.style.display = "flex";
+            btnCircle.style.alignItems = "center";
+            btnCircle.style.justifyContent = "center";
+
+            const textSpan = document.createElement("span");
+            textSpan.textContent = "SEND";
+            textSpan.style.color = "#000";
+            textSpan.style.fontWeight = "900";
+            textSpan.style.fontSize = "14px";
+            btnCircle.appendChild(textSpan);
+
+            document.body.appendChild(btnCircle);
+            setTimeout(() => {
+              btnCircle.style.transition = "opacity 0.5s";
+              btnCircle.style.opacity = "0";
+              setTimeout(() => btnCircle.remove(), 500);
+            }, 1500);
+          },
+          { clickX: btnX, clickY: btnY }
+        );
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Сам клик
       await page.mouse.click(btnX, btnY);
       log("info", `✅ Клик по кнопке "Отправить" выполнен`);
-      await randomDelay(10000, 20000, shouldContinue);
+      await randomDelay(5000, 6000, shouldContinue);
+
+      if (process.env.NODE_ENV !== "production") {
+        // 🔥 КРИТИЧЕСКИ ВАЖНО: Даем время видео-рекордеру захватить кадры ПОСЛЕ клика,
+        // прежде чем мы начнем закрывать браузер
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        log("info", `💾 Подготовка к сохранению видео...`);
+
+        // 1. Получаем объект видео ПОКА контекст еще открыт
+        const video = page.video();
+
+        if (video) {
+          try {
+            // 2. Создаем папку, если нет
+            if (!fs.existsSync("videos")) {
+              fs.mkdirSync("videos", { recursive: true });
+            }
+
+            const finalVideoName = `videos/captcha_solve_${Date.now()}.webm`;
+
+            // 3. ЗАКРЫВАЕМ контекст. Это финализирует запись видео-файла!
+            log("info", `🔚 Закрытие контекста для финализации видео...`);
+            await context.close();
+
+            // 4. ТЕПЕРЬ сохраняем видео из временной папки в нашу
+            await video.saveAs(finalVideoName);
+            log("info", `🎥 ВИДЕО УСПЕШНО СОХРАНЕНО: ${finalVideoName}`);
+          } catch (saveErr) {
+            log("error", `❌ Ошибка при сохранении видео: ${saveErr.message}`);
+            // На случай ошибки все равно закрываем контекст
+            await context.close().catch(() => {});
+          }
+        } else {
+          log(
+            "warn",
+            `⚠️ Видео не было записано. Проверь настройки browser.newContext`
+          );
+          await context.close().catch(() => {});
+        }
+      }
 
       // === ПРАВИЛЬНОЕ СОХРАНЕНИЕ ВИДЕО ===
 

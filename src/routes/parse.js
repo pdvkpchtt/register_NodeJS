@@ -277,7 +277,7 @@ async function runParseJob(app) {
           email: emailAddress || "новая",
         });
 
-        const result = await processRow(
+        var result = await processRow(
           row,
           {
             externalEmail: shouldGenerateEmail ? null : emailAddress,
@@ -285,6 +285,18 @@ async function runParseJob(app) {
           },
           emitLog
         );
+
+        if (result.success === false) {
+          emitLog("warn", "⚠️ Неудача: вторая попытка");
+          result = await processRow(
+            row,
+            {
+              externalEmail: shouldGenerateEmail ? null : emailAddress,
+              shouldContinue: () => memoryStore.isProcessing(),
+            },
+            emitLog
+          );
+        }
 
         if (result.cancelled) {
           emitLog("warn", "⚠️ Остановка: прервана текущая строка");
