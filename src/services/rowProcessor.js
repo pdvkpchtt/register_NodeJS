@@ -451,7 +451,9 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     const page = await context.newPage();
     await page.addInitScript(INIT_SCRIPTS);
 
-    log("info", `🔗 Переход на ${loginUrl}`);
+    if (process.env.NODE_ENV !== "production") {
+      log("info", `🔗 Переход на ${loginUrl}`);
+    }
     await raceWithCancel(
       page.goto(loginUrl, {
         waitUntil: "domcontentloaded",
@@ -463,47 +465,63 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     // === Заполнение формы ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Фамилия"]) {
-      log("info", `⌨️ Ввод фамилии...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод фамилии...`);
+      }
       await typeHumanLike(page, familia, row["Фамилия"]);
     }
 
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Имя"]) {
-      log("info", `⌨️ Ввод имени...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод имени...`);
+      }
       await typeHumanLike(page, imya, row["Имя"]);
     }
 
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Отчество"]) {
-      log("info", `⌨️ Ввод отчества...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод отчества...`);
+      }
       await typeHumanLike(page, otchestvo, row["Отчество"]);
     }
 
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Город"]) {
-      log("info", `⌨️ Ввод города...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод города...`);
+      }
       await clickAndTypeHumanLike(page, city, row["Город"]);
       await randomDelay(2000, 2500, shouldContinue);
       page.locator(`xpath=${cityChoose}`).click({ delay: 200 });
 
-      log("info", `✅ Город выбран: ${row["Город"]}`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `✅ Город выбран: ${row["Город"]}`);
+      }
     }
 
     // === Дата рождения ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     const bday = randomBirthDate();
-    log("info", `⌨️ Ввод даты рождения..., ${bday}`);
+    if (process.env.NODE_ENV !== "production") {
+      log("info", `⌨️ Ввод даты рождения..., ${bday}`);
+    }
     page.locator(`xpath=${birthDay}`).fill(bday);
 
     // === Телефон ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Телефон"]) {
-      log("info", `⌨️ Ввод телефона...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод телефона...`);
+      }
       await typeHumanLike(page, phoneField, row["Телефон"]);
     }
 
     // === Студент ===
-    log("info", `⌨️ Ввод поля "Студент"...`);
+    if (process.env.NODE_ENV !== "production") {
+      log("info", `⌨️ Ввод поля "Студент"...`);
+    }
     const locator = page.locator(`xpath=${studentSelect}`);
     await locator.click({ delay: 200 });
     await page.keyboard.press("ArrowDown", { delay: 100 });
@@ -514,27 +532,35 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     const emailAddress = row["Почта"];
     if (emailAddress) {
-      log("info", `⌨️ Ввод почты: ${emailAddress}`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод почты: ${emailAddress}`);
+      }
       await typeHumanLike(page, emailField, emailAddress);
     }
 
     // === Пароль ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
     if (row["Пароль"]) {
-      log("info", `⌨️ Ввод пароля...`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `⌨️ Ввод пароля...`);
+      }
       await typeHumanLike(page, passwordField, row["Пароль"]);
       await typeHumanLike(page, passwordRepeatField, row["Пароль"]);
     }
 
     // === Чекбокс ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-    log("info", `🖱️ Клик по чекбоксу...`);
+    if (process.env.NODE_ENV !== "production") {
+      log("info", `🖱️ Клик по чекбоксу...`);
+    }
     await page.locator(`xpath=${checkBoxOne}`).click({ delay: 200 });
     await page.locator(`xpath=${checkBoxTwo}`).click({ delay: 200 });
 
     // === Отправка формы ===
     await randomDelay(humanDelayMin, humanDelayMax, shouldContinue);
-    log("info", `🖱️ Клик по "Продолжить"...`);
+    if (process.env.NODE_ENV !== "production") {
+      log("info", `🖱️ Клик по "Продолжить"...`);
+    }
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
     await randomDelay(1000, 3000, shouldContinue);
 
@@ -561,10 +587,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         height: captchaHeight,
       };
 
-      log(
-        "debug",
-        `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
-      );
+      if (process.env.NODE_ENV !== "production") {
+        log(
+          "debug",
+          `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
+        );
+      }
 
       const screenshot = await page.screenshot({
         type: "png",
@@ -621,7 +649,9 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         );
       }
 
-      log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
+      if (process.env.NODE_ENV !== "production") {
+        log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
+      }
 
       // Рисуем квадраты на скринах для проверки
       if (process.env.NODE_ENV !== "production") {
@@ -660,10 +690,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
         const x = clipX + parseInt(coord.x);
         const y = clipY + parseInt(coord.y);
 
-        log(
-          "info",
-          `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
-        );
+        if (process.env.NODE_ENV !== "production") {
+          log(
+            "info",
+            `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
+          );
+        }
 
         // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
         if (process.env.NODE_ENV !== "production") {
@@ -829,7 +861,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     // === Финальный результат ===
     // === Финальный результат ===
     const finalUrl = page.url();
-    const isCorrectUrl = finalUrl === "https://lift-bf.ru/contest/ocean";
+    const isCorrectUrl =
+      finalUrl === "https://lift-bf.ru/contest/stipendia-vuz-2026";
     log("debug", `🤷‍♂️ cleanUrl - ${finalUrl}`);
 
     const trulySucceeded = !!isCorrectUrl;
