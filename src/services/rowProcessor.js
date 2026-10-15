@@ -6,6 +6,8 @@ import "dotenv/config";
 import * as cheerio from "cheerio";
 import fs from "fs";
 import sharp from "sharp";
+// Добавьте в самый верх файла:
+import { expect } from "@playwright/test";
 
 // 🔥 Функция для извлечения кода из HTML
 function extractVerificationCode(htmlContent) {
@@ -363,7 +365,7 @@ function parseExcelDate(value) {
 
 export const processRow = async (row, options = {}, emitLog = null) => {
   const {
-    loginUrl = "https://lift-bf.ru/contest/stipendia-vuz-2026?z=register",
+    loginUrl = "https://lift-bf.ru/?z=register",
     familia = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[1]/div/input",
     imya = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[2]/div/input",
     otchestvo = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/div[1]/div/label[1]/div/input",
@@ -378,8 +380,8 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     checkBoxTwo = "/html/body/div[1]/div[1]/div/div/div/form/label[2]/span[2]/div/span",
     submitButton = "/html/body/div[1]/div[1]/div/div/div/form/div[2]/button",
     studentSelect = "/html/body/div[1]/div[1]/div/div/div/form/div[1]/label[6]",
-    secondSubmitButton = "/html/body/div[5]/div[1]/div/div/div/form/div[3]/button",
-    captha = "/html/body/div[2]/div[2]/div/div/div/div/div/div[1]/div/img",
+    fuckingRegister = "/html/body/div[1]/main/div[1]/div[1]/div[1]/div[3]/div/button",
+    textForheck = "/html/body/div[1]/div[2]/div/div/div/h5",
     humanDelayMin = 1000,
     humanDelayMax = 3000,
     externalEmail = null,
@@ -862,11 +864,55 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     // === Финальный результат ===
     const finalUrl = page.url();
     const isCorrectUrl =
-      finalUrl === "https://lift-bf.ru/contest/stipendia-vuz-2026";
+      finalUrl === "https://lift-bf.ru/studentam-i-vypusknikam-vuzov-i-spo";
     log("debug", `🤷‍♂️ cleanUrl - ${finalUrl}`);
 
-    const trulySucceeded = !!isCorrectUrl;
-    const completed = trulySucceeded ? "да" : "нет";
+    await randomDelay(1000, 3000, shouldContinue);
+
+    log("debug", `🤷‍♂️ Переходим на выбор кокнурса`);
+    await raceWithCancel(
+      page.goto("https://lift-bf.ru/contest/stipendia-vuz-2026", {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      }),
+      shouldContinue
+    );
+    await randomDelay(500, 1000, shouldContinue);
+    log("debug", `🤷‍♂️ закрываем всплывашку`);
+    await page.keyboard.press("Escape");
+    await randomDelay(500, 1000, shouldContinue);
+    log("debug", `🤷‍♂️ нажимаем регистрацию`);
+    await page.locator(`xpath=${fuckingRegister}`).click({ delay: 200 });
+    await randomDelay(2000, 3000, shouldContinue);
+    const locatorSex = page.locator(
+      'h5:has-text("Регистрация прошла успешно")'
+    );
+
+    var trulySucceeded = false;
+    var completed = "нет";
+    log("debug", `🤷‍♂️ проверяем текст...`);
+
+    try {
+      await expect(locatorSex).toContainText("Регистрация прошла успешно", {
+        timeout: 5000,
+      });
+
+      trulySucceeded = true;
+      completed = "да";
+      log("debug", `✅ Регистрация прошла успешно`);
+    } catch (e) {
+      console.log("❌ Текст не совпал или элемент не появился за 5 сек.");
+
+      try {
+        const allH5 = await page.locator("h5").allTextContents();
+        console.log(
+          "🔍 Все тексты в <h5> на странице:",
+          allH5.map((t) => JSON.stringify(t))
+        );
+      } catch (err) {
+        console.log("🔍 Элементы <h5> вообще не найдены на странице.");
+      }
+    }
 
     log(
       trulySucceeded ? "success" : "warn",
