@@ -563,7 +563,15 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     if (process.env.NODE_ENV !== "production") {
       log("info", `🖱️ Клик по "Продолжить"...`);
     }
-    await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
+    const button = await page.locator(`xpath=${submitButton}`);
+    if (button) {
+      button.click({ delay: 200 });
+      await randomDelay(1000, 3000, shouldContinue);
+    }
+    const button2 = await page.locator(`xpath=${submitButton}`);
+    if (button2) {
+      button.click({ delay: 200 });
+    }
     await randomDelay(1000, 3000, shouldContinue);
 
     log("debug", `🔗 Форма отправлена`);
