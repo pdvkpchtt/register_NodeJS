@@ -568,10 +568,12 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       button.click({ delay: 200 });
       await randomDelay(1000, 3000, shouldContinue);
     }
-    const button2 = await page.locator(`xpath=${submitButton}`);
-    if (button2) {
-      button.click({ delay: 200 });
-    }
+    try {
+      const button2 = await page.locator(`xpath=${submitButton}`);
+      if (button2) {
+        button.click({ delay: 200 });
+      }
+    } catch (err) {}
     await randomDelay(1000, 3000, shouldContinue);
 
     log("debug", `🔗 Форма отправлена`);
