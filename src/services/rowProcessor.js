@@ -253,7 +253,7 @@ const BROWSER_CONFIG =
         ],
       }
     : {
-        headless: false, // 🔥 Меняем false → true (или "new" для нового режима)
+        headless: true, // 🔥 Меняем false → true (или "new" для нового режима)
         viewport: { width: 1920, height: 1920 },
         userAgent:
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -565,6 +565,52 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     }
     await page.locator(`xpath=${submitButton}`).click({ delay: 200 });
     await randomDelay(1000, 3000, shouldContinue);
+    const targetUrl = "https://lift-bf.ru/studentam-i-vypusknikam-vuzov-i-spo";
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (!page.url().includes(targetUrl) && attempts < maxAttempts) {
+      attempts++;
+
+      try {
+        log(
+          "info",
+          `🖱️ Клик по кнопке... (Попытка ${attempts} из ${maxAttempts})`
+        );
+
+        await page
+          .locator(`xpath=${submitButton}`)
+          .click({ force: true, delay: 200 });
+
+        // Пауза для обработки запроса или редиректа
+        await page.waitForTimeout(1000);
+      } catch (error) {
+        log(
+          "error",
+          `Клик не удался на попытке ${attempts}. Ошибка: ${error.message}`
+        );
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    // Проверка результата после выхода из цикла
+    if (page.url().includes(targetUrl)) {
+      log(
+        "info",
+        `✅ Успешно перешли на целевую страницу за ${attempts} попыток!`
+      );
+    } else {
+      log(
+        "error",
+        `❌ Не удалось перейти на целевую страницу после ${maxAttempts} попыток. Текущий URL: ${page.url()}`
+      );
+
+      // Опционально: можно сделать скриншот для отладки
+      // await page.screenshot({ path: 'error-screenshot.png' });
+
+      // Опционально: выбросить ошибку, чтобы остановить весь скрипт
+      // throw new Error("Превышен лимит попыток клика");
+    }
 
     log("debug", `🔗 Форма отправлена`);
 
@@ -573,289 +619,289 @@ export const processRow = async (row, options = {}, emitLog = null) => {
     // === РЕШЕНИЕ YANDEX SMARTCAPTCHA ===
     // === РЕШЕНИЕ YANDEX SMARTCAPTCHA (СКРИН С КВАДРАТАМИ) ===
     log("info", `🔍 Решение капчи...`);
-    try {
-      const viewport = page.viewportSize();
-      if (!viewport) throw new Error("Не удалось получить размеры viewport");
+    // try {
+    //   const viewport = page.viewportSize();
+    //   if (!viewport) throw new Error("Не удалось получить размеры viewport");
 
-      const captchaWidth = 500;
-      const captchaHeight = 500;
-      const clipX = Math.floor((viewport.width - captchaWidth) / 2);
-      const clipY = Math.floor((viewport.height - captchaHeight) / 2);
+    //   const captchaWidth = 500;
+    //   const captchaHeight = 500;
+    //   const clipX = Math.floor((viewport.width - captchaWidth) / 2);
+    //   const clipY = Math.floor((viewport.height - captchaHeight) / 2);
 
-      const clipRegion = {
-        x: clipX,
-        y: clipY,
-        width: captchaWidth,
-        height: captchaHeight,
-      };
+    //   const clipRegion = {
+    //     x: clipX,
+    //     y: clipY,
+    //     width: captchaWidth,
+    //     height: captchaHeight,
+    //   };
 
-      if (process.env.NODE_ENV !== "production") {
-        log(
-          "debug",
-          `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
-        );
-      }
+    //   if (process.env.NODE_ENV !== "production") {
+    //     log(
+    //       "debug",
+    //       `📸 Область капчи: x=${clipX}, y=${clipY}, w=${captchaWidth}, h=${captchaHeight}`
+    //     );
+    //   }
 
-      const screenshot = await page.screenshot({
-        type: "png",
-        clip: clipRegion,
-      });
+    //   const screenshot = await page.screenshot({
+    //     type: "png",
+    //     clip: clipRegion,
+    //   });
 
-      // 2captcha
-      // === 🔥 ПОВТОРНАЯ ОТПРАВКА В 2CAPTCHA ПРИ НЕВЕРНОМ ОТВЕТЕ ===
-      const solver = new Solver(process.env.API_KEY);
-      let result = null;
-      const maxRetries = 3; // Максимум 3 попытки
-      let attempt = 0;
+    //   // 2captcha
+    //   // === 🔥 ПОВТОРНАЯ ОТПРАВКА В 2CAPTCHA ПРИ НЕВЕРНОМ ОТВЕТЕ ===
+    //   const solver = new Solver(process.env.API_KEY);
+    //   let result = null;
+    //   const maxRetries = 3; // Максимум 3 попытки
+    //   let attempt = 0;
 
-      while (attempt < maxRetries) {
-        attempt++;
-        log(
-          "info",
-          `🔄 Отправка в 2captcha (попытка ${attempt}/${maxRetries})...`
-        );
+    //   while (attempt < maxRetries) {
+    //     attempt++;
+    //     log(
+    //       "info",
+    //       `🔄 Отправка в 2captcha (попытка ${attempt}/${maxRetries})...`
+    //     );
 
-        result = await solver.coordinates({
-          body: screenshot.toString("base64"),
-          lang: "ru",
-        });
+    //     result = await solver.coordinates({
+    //       body: screenshot.toString("base64"),
+    //       lang: "ru",
+    //     });
 
-        log("info", `✅ Ответ от 2captcha: ${JSON.stringify(result.data)}`);
+    //     log("info", `✅ Ответ от 2captcha: ${JSON.stringify(result.data)}`);
 
-        // Проверяем, что точек больше 1 (для Яндекса обычно нужно 2-5 точек)
-        if (result.data && result.data.length > 1) {
-          log(
-            "info",
-            `✅ Получено корректное количество точек: ${result.data.length}`
-          );
-          break; // Всё хорошо, выходим из цикла
-        } else {
-          log(
-            "warn",
-            `⚠️ Неверное количество точек (${
-              result.data ? result.data.length : 0
-            }). Повторная попытка...`
-          );
-          if (attempt < maxRetries) {
-            await new Promise((resolve) => setTimeout(resolve, 1500)); // Пауза перед повтором
-          }
-        }
-      }
+    //     // Проверяем, что точек больше 1 (для Яндекса обычно нужно 2-5 точек)
+    //     if (result.data && result.data.length > 1) {
+    //       log(
+    //         "info",
+    //         `✅ Получено корректное количество точек: ${result.data.length}`
+    //       );
+    //       break; // Всё хорошо, выходим из цикла
+    //     } else {
+    //       log(
+    //         "warn",
+    //         `⚠️ Неверное количество точек (${
+    //           result.data ? result.data.length : 0
+    //         }). Повторная попытка...`
+    //       );
+    //       if (attempt < maxRetries) {
+    //         await new Promise((resolve) => setTimeout(resolve, 1500)); // Пауза перед повтором
+    //       }
+    //     }
+    //   }
 
-      // Если после всех попыток точек всё ещё <= 1, выбрасываем ошибку
-      if (!result || !result.data || result.data.length <= 1) {
-        throw new Error(
-          `Не удалось получить корректные координаты после ${maxRetries} попыток. Последний ответ: ${JSON.stringify(
-            result?.data
-          )}`
-        );
-      }
+    //   // Если после всех попыток точек всё ещё <= 1, выбрасываем ошибку
+    //   if (!result || !result.data || result.data.length <= 1) {
+    //     throw new Error(
+    //       `Не удалось получить корректные координаты после ${maxRetries} попыток. Последний ответ: ${JSON.stringify(
+    //         result?.data
+    //       )}`
+    //     );
+    //   }
 
-      if (process.env.NODE_ENV !== "production") {
-        log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
-      }
+    //   if (process.env.NODE_ENV !== "production") {
+    //     log("info", `✅ Координаты получены: ${JSON.stringify(result.data)}`);
+    //   }
 
-      // Рисуем квадраты на скринах для проверки
-      if (process.env.NODE_ENV !== "production") {
-        try {
-          const overlays = result.data.map((coord) => {
-            const x = parseInt(coord.x);
-            const y = parseInt(coord.y);
-            return {
-              input: {
-                create: {
-                  width: 40,
-                  height: 40,
-                  channels: 4,
-                  background: { r: 255, g: 0, b: 0, alpha: 0.6 },
-                },
-              },
-              top: y - 20,
-              left: x - 20,
-            };
-          });
-          await sharp(screenshot)
-            .composite(overlays)
-            .toFile("captcha_center_with_squares.png");
-        } catch (drawErr) {
-          log("warn", `⚠️ Ошибка рисования квадратиков: ${drawErr.message}`);
-        }
-      }
+    //   // Рисуем квадраты на скринах для проверки
+    //   if (process.env.NODE_ENV !== "production") {
+    //     try {
+    //       const overlays = result.data.map((coord) => {
+    //         const x = parseInt(coord.x);
+    //         const y = parseInt(coord.y);
+    //         return {
+    //           input: {
+    //             create: {
+    //               width: 40,
+    //               height: 40,
+    //               channels: 4,
+    //               background: { r: 255, g: 0, b: 0, alpha: 0.6 },
+    //             },
+    //           },
+    //           top: y - 20,
+    //           left: x - 20,
+    //         };
+    //       });
+    //       await sharp(screenshot)
+    //         .composite(overlays)
+    //         .toFile("captcha_center_with_squares.png");
+    //     } catch (drawErr) {
+    //       log("warn", `⚠️ Ошибка рисования квадратиков: ${drawErr.message}`);
+    //     }
+    //   }
 
-      // === КЛИКИ С ВИЗУАЛИЗАЦИЕЙ ===
-      log("info", `🖱️ Начинаем клики с визуализацией...`);
+    //   // === КЛИКИ С ВИЗУАЛИЗАЦИЕЙ ===
+    //   log("info", `🖱️ Начинаем клики с визуализацией...`);
 
-      for (let i = 0; i < result.data.length; i++) {
-        const coord = result.data[i];
+    //   for (let i = 0; i < result.data.length; i++) {
+    //     const coord = result.data[i];
 
-        // Чистая математика: начало области + координата от 2captcha
-        const x = clipX + parseInt(coord.x);
-        const y = clipY + parseInt(coord.y);
+    //     // Чистая математика: начало области + координата от 2captcha
+    //     const x = clipX + parseInt(coord.x);
+    //     const y = clipY + parseInt(coord.y);
 
-        if (process.env.NODE_ENV !== "production") {
-          log(
-            "info",
-            `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
-          );
-        }
+    //     if (process.env.NODE_ENV !== "production") {
+    //       log(
+    //         "info",
+    //         `🖱️ Клик ${i + 1}/${result.data.length}: Абсолютные (${x}, ${y})`
+    //       );
+    //     }
 
-        // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
-        if (process.env.NODE_ENV !== "production") {
-          await page.evaluate(
-            ({ clickX, clickY, clickNumber }) => {
-              const circle = document.createElement("div");
-              circle.style.position = "fixed";
-              circle.style.left = clickX - 25 + "px";
-              circle.style.top = clickY - 25 + "px";
-              circle.style.width = "50px";
-              circle.style.height = "50px";
-              circle.style.borderRadius = "50%";
-              circle.style.border = "4px solid #ff0000";
-              circle.style.background = "rgba(255, 0, 0, 0.5)";
-              circle.style.zIndex = "99999999";
-              circle.style.pointerEvents = "none";
-              circle.style.display = "flex";
-              circle.style.alignItems = "center";
-              circle.style.justifyContent = "center";
+    //     // === ВИЗУАЛИЗАЦИЯ КРУЖКА (Playwright запишет это на видео!) ===
+    //     if (process.env.NODE_ENV !== "production") {
+    //       await page.evaluate(
+    //         ({ clickX, clickY, clickNumber }) => {
+    //           const circle = document.createElement("div");
+    //           circle.style.position = "fixed";
+    //           circle.style.left = clickX - 25 + "px";
+    //           circle.style.top = clickY - 25 + "px";
+    //           circle.style.width = "50px";
+    //           circle.style.height = "50px";
+    //           circle.style.borderRadius = "50%";
+    //           circle.style.border = "4px solid #ff0000";
+    //           circle.style.background = "rgba(255, 0, 0, 0.5)";
+    //           circle.style.zIndex = "99999999";
+    //           circle.style.pointerEvents = "none";
+    //           circle.style.display = "flex";
+    //           circle.style.alignItems = "center";
+    //           circle.style.justifyContent = "center";
 
-              const numberSpan = document.createElement("span");
-              numberSpan.textContent = clickNumber;
-              numberSpan.style.color = "#fff";
-              numberSpan.style.fontWeight = "bold";
-              numberSpan.style.fontSize = "20px";
-              circle.appendChild(numberSpan);
+    //           const numberSpan = document.createElement("span");
+    //           numberSpan.textContent = clickNumber;
+    //           numberSpan.style.color = "#fff";
+    //           numberSpan.style.fontWeight = "bold";
+    //           numberSpan.style.fontSize = "20px";
+    //           circle.appendChild(numberSpan);
 
-              // Анимация пульсации
-              circle.animate(
-                [
-                  { transform: "scale(1)" },
-                  { transform: "scale(1.4)" },
-                  { transform: "scale(1)" },
-                ],
-                { duration: 400, iterations: 2 }
-              );
+    //           // Анимация пульсации
+    //           circle.animate(
+    //             [
+    //               { transform: "scale(1)" },
+    //               { transform: "scale(1.4)" },
+    //               { transform: "scale(1)" },
+    //             ],
+    //             { duration: 400, iterations: 2 }
+    //           );
 
-              document.body.appendChild(circle);
+    //           document.body.appendChild(circle);
 
-              // Плавное исчезновение
-              setTimeout(() => {
-                circle.style.transition = "opacity 0.5s";
-                circle.style.opacity = "0";
-                setTimeout(() => circle.remove(), 500);
-              }, 1500);
-            },
-            { clickX: x, clickY: y, clickNumber: i + 1 }
-          );
-          // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
+    //           // Плавное исчезновение
+    //           setTimeout(() => {
+    //             circle.style.transition = "opacity 0.5s";
+    //             circle.style.opacity = "0";
+    //             setTimeout(() => circle.remove(), 500);
+    //           }, 1500);
+    //         },
+    //         { clickX: x, clickY: y, clickNumber: i + 1 }
+    //       );
+    //       // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
+    //       await new Promise((resolve) => setTimeout(resolve, 200));
+    //     }
 
-        // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
-        await page.mouse.click(x, y);
+    //     // Пауза, чтобы кружок успел отрисоваться в кадре видео перед кликом
+    //     await page.mouse.click(x, y);
 
-        // Human delay между кликами
-        await randomDelay(1000, 1500, shouldContinue);
-      }
+    //     // Human delay между кликами
+    //     await randomDelay(1000, 1500, shouldContinue);
+    //   }
 
-      log("info", `✅ Все точки нажаты`);
-      await randomDelay(1000, 1500, shouldContinue);
+    //   log("info", `✅ Все точки нажаты`);
+    //   await randomDelay(1000, 1500, shouldContinue);
 
-      // Клик по кнопке "Отправить"
-      const btnX = clipX + captchaWidth / 2 + 30;
-      const btnY = clipY + captchaHeight - 150;
+    //   // Клик по кнопке "Отправить"
+    //   const btnX = clipX + captchaWidth / 2 + 30;
+    //   const btnY = clipY + captchaHeight - 150;
 
-      if (process.env.NODE_ENV !== "production") {
-        // Визуализация зеленой кнопки SEND
-        // Визуализация зеленой кнопки SEND
-        await page.evaluate(
-          ({ clickX, clickY }) => {
-            const btnCircle = document.createElement("div");
-            btnCircle.style.position = "fixed";
-            btnCircle.style.left = clickX - 30 + "px";
-            btnCircle.style.top = clickY - 30 + "px";
-            btnCircle.style.width = "60px";
-            btnCircle.style.height = "60px";
-            btnCircle.style.borderRadius = "50%";
-            btnCircle.style.border = "4px solid #00ff00";
-            btnCircle.style.background = "rgba(0, 255, 0, 0.5)";
-            btnCircle.style.zIndex = "99999999";
-            btnCircle.style.pointerEvents = "none";
-            btnCircle.style.display = "flex";
-            btnCircle.style.alignItems = "center";
-            btnCircle.style.justifyContent = "center";
+    //   if (process.env.NODE_ENV !== "production") {
+    //     // Визуализация зеленой кнопки SEND
+    //     // Визуализация зеленой кнопки SEND
+    //     await page.evaluate(
+    //       ({ clickX, clickY }) => {
+    //         const btnCircle = document.createElement("div");
+    //         btnCircle.style.position = "fixed";
+    //         btnCircle.style.left = clickX - 30 + "px";
+    //         btnCircle.style.top = clickY - 30 + "px";
+    //         btnCircle.style.width = "60px";
+    //         btnCircle.style.height = "60px";
+    //         btnCircle.style.borderRadius = "50%";
+    //         btnCircle.style.border = "4px solid #00ff00";
+    //         btnCircle.style.background = "rgba(0, 255, 0, 0.5)";
+    //         btnCircle.style.zIndex = "99999999";
+    //         btnCircle.style.pointerEvents = "none";
+    //         btnCircle.style.display = "flex";
+    //         btnCircle.style.alignItems = "center";
+    //         btnCircle.style.justifyContent = "center";
 
-            const textSpan = document.createElement("span");
-            textSpan.textContent = "SEND";
-            textSpan.style.color = "#000";
-            textSpan.style.fontWeight = "900";
-            textSpan.style.fontSize = "14px";
-            btnCircle.appendChild(textSpan);
+    //         const textSpan = document.createElement("span");
+    //         textSpan.textContent = "SEND";
+    //         textSpan.style.color = "#000";
+    //         textSpan.style.fontWeight = "900";
+    //         textSpan.style.fontSize = "14px";
+    //         btnCircle.appendChild(textSpan);
 
-            document.body.appendChild(btnCircle);
-            setTimeout(() => {
-              btnCircle.style.transition = "opacity 0.5s";
-              btnCircle.style.opacity = "0";
-              setTimeout(() => btnCircle.remove(), 500);
-            }, 1500);
-          },
-          { clickX: btnX, clickY: btnY }
-        );
-      }
+    //         document.body.appendChild(btnCircle);
+    //         setTimeout(() => {
+    //           btnCircle.style.transition = "opacity 0.5s";
+    //           btnCircle.style.opacity = "0";
+    //           setTimeout(() => btnCircle.remove(), 500);
+    //         }, 1500);
+    //       },
+    //       { clickX: btnX, clickY: btnY }
+    //     );
+    //   }
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    //   await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Сам клик
-      await page.mouse.click(btnX, btnY);
-      log("info", `✅ Клик по кнопке "Отправить" выполнен`);
-      await randomDelay(5000, 6000, shouldContinue);
+    //   // Сам клик
+    //   await page.mouse.click(btnX, btnY);
+    //   log("info", `✅ Клик по кнопке "Отправить" выполнен`);
+    //   await randomDelay(5000, 6000, shouldContinue);
 
-      if (process.env.NODE_ENV !== "production") {
-        // 🔥 КРИТИЧЕСКИ ВАЖНО: Даем время видео-рекордеру захватить кадры ПОСЛЕ клика,
-        // прежде чем мы начнем закрывать браузер
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        log("info", `💾 Подготовка к сохранению видео...`);
+    //   if (process.env.NODE_ENV !== "production") {
+    //     // 🔥 КРИТИЧЕСКИ ВАЖНО: Даем время видео-рекордеру захватить кадры ПОСЛЕ клика,
+    //     // прежде чем мы начнем закрывать браузер
+    //     await new Promise((resolve) => setTimeout(resolve, 1500));
+    //     log("info", `💾 Подготовка к сохранению видео...`);
 
-        // 1. Получаем объект видео ПОКА контекст еще открыт
-        const video = page.video();
+    //     // 1. Получаем объект видео ПОКА контекст еще открыт
+    //     const video = page.video();
 
-        if (video) {
-          try {
-            // 2. Создаем папку, если нет
-            if (!fs.existsSync("videos")) {
-              fs.mkdirSync("videos", { recursive: true });
-            }
+    //     if (video) {
+    //       try {
+    //         // 2. Создаем папку, если нет
+    //         if (!fs.existsSync("videos")) {
+    //           fs.mkdirSync("videos", { recursive: true });
+    //         }
 
-            const finalVideoName = `videos/captcha_solve_${Date.now()}.webm`;
+    //         const finalVideoName = `videos/captcha_solve_${Date.now()}.webm`;
 
-            // 3. ЗАКРЫВАЕМ контекст. Это финализирует запись видео-файла!
-            log("info", `🔚 Закрытие контекста для финализации видео...`);
-            await context.close();
+    //         // 3. ЗАКРЫВАЕМ контекст. Это финализирует запись видео-файла!
+    //         log("info", `🔚 Закрытие контекста для финализации видео...`);
+    //         await context.close();
 
-            // 4. ТЕПЕРЬ сохраняем видео из временной папки в нашу
-            await video.saveAs(finalVideoName);
-            log("info", `🎥 ВИДЕО УСПЕШНО СОХРАНЕНО: ${finalVideoName}`);
-          } catch (saveErr) {
-            log("error", `❌ Ошибка при сохранении видео: ${saveErr.message}`);
-            // На случай ошибки все равно закрываем контекст
-            await context.close().catch(() => {});
-          }
-        } else {
-          log(
-            "warn",
-            `⚠️ Видео не было записано. Проверь настройки browser.newContext`
-          );
-          await context.close().catch(() => {});
-        }
-      }
+    //         // 4. ТЕПЕРЬ сохраняем видео из временной папки в нашу
+    //         await video.saveAs(finalVideoName);
+    //         log("info", `🎥 ВИДЕО УСПЕШНО СОХРАНЕНО: ${finalVideoName}`);
+    //       } catch (saveErr) {
+    //         log("error", `❌ Ошибка при сохранении видео: ${saveErr.message}`);
+    //         // На случай ошибки все равно закрываем контекст
+    //         await context.close().catch(() => {});
+    //       }
+    //     } else {
+    //       log(
+    //         "warn",
+    //         `⚠️ Видео не было записано. Проверь настройки browser.newContext`
+    //       );
+    //       await context.close().catch(() => {});
+    //     }
+    //   }
 
-      // === ПРАВИЛЬНОЕ СОХРАНЕНИЕ ВИДЕО ===
+    //   // === ПРАВИЛЬНОЕ СОХРАНЕНИЕ ВИДЕО ===
 
-      log("info", `✅ Капча решена`);
-      await randomDelay(1000, 2000, shouldContinue);
-    } catch (err) {
-      log("warn", `⚠️ Ошибка капчи: ${err.message}`);
-    }
-    // сюда код
+    //   log("info", `✅ Капча решена`);
+    //   await randomDelay(1000, 2000, shouldContinue);
+    // } catch (err) {
+    //   log("warn", `⚠️ Ошибка капчи: ${err.message}`);
+    // }
+    // // сюда код
 
     log("debug", `😁👍 Капча решена`);
     await randomDelay(1000, 3000, shouldContinue);
@@ -877,13 +923,13 @@ export const processRow = async (row, options = {}, emitLog = null) => {
       }),
       shouldContinue
     );
-    await randomDelay(500, 1000, shouldContinue);
+    await randomDelay(1500, 2000, shouldContinue);
     log("debug", `🤷‍♂️ закрываем всплывашку`);
     await page.keyboard.press("Escape");
-    await randomDelay(500, 1000, shouldContinue);
+    await randomDelay(1500, 2000, shouldContinue);
     log("debug", `🤷‍♂️ нажимаем регистрацию`);
     await page.locator(`xpath=${fuckingRegister}`).click({ delay: 200 });
-    await randomDelay(2000, 3000, shouldContinue);
+    await randomDelay(3000, 3500, shouldContinue);
     const locatorSex = page.locator(
       'h5:has-text("Регистрация прошла успешно")'
     );
