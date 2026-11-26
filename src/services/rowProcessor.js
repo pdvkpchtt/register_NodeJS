@@ -917,7 +917,7 @@ export const processRow = async (row, options = {}, emitLog = null) => {
 
     log("debug", `🤷‍♂️ Переходим на выбор кокнурса`);
     await raceWithCancel(
-      page.goto("https://lift-bf.ru/contest/stipendia-vuz-2026", {
+      page.goto("https://lift-bf.ru/contest/stipendia-spo-2026", {
         waitUntil: "domcontentloaded",
         timeout: 30000,
       }),
